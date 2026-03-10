@@ -39,12 +39,22 @@ An interactive market microstructure analytics platform that uses Hidden Markov 
 git clone https://github.com/CameronScarpati/lob-regime-scanner.git
 cd lob-regime-scanner
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate
+# Quick setup (creates .venv, installs package + dev dependencies)
+make install-dev
 
-# Install dependencies
-pip install -r requirements.txt
+# Activate the virtual environment
+source .venv/bin/activate
+
+# Run tests
+make test
+```
+
+Or manually:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
 ```
 
 ## Project Structure
