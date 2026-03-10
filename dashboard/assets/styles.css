@@ -1,1 +1,205 @@
-/* LOB Regime Scanner Dashboard Styles */
+/* LOB Regime Scanner Dashboard — Dark Theme */
+
+/* ── Reset & base ── */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: #0d1117;
+    color: #c9d1d9;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+        sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* ── App container ── */
+#app-container {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 12px 20px;
+}
+
+/* ── Header ── */
+.dashboard-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    margin-bottom: 12px;
+    background: linear-gradient(135deg, #161b22 0%, #1a2332 100%);
+    border: 1px solid #30363d;
+    border-radius: 8px;
+}
+
+.dashboard-header h1 {
+    font-size: 22px;
+    font-weight: 600;
+    color: #f0f6fc;
+    letter-spacing: 0.5px;
+}
+
+.header-meta {
+    display: flex;
+    gap: 24px;
+    font-size: 13px;
+    color: #8b949e;
+}
+
+.header-meta span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.header-meta .label {
+    color: #58a6ff;
+    font-weight: 500;
+}
+
+/* ── Controls bar ── */
+.controls-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 20px;
+    margin-bottom: 12px;
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+}
+
+.controls-bar .slider-container {
+    flex: 1;
+}
+
+.controls-bar .slider-label {
+    font-size: 12px;
+    color: #8b949e;
+    margin-bottom: 4px;
+}
+
+/* ── Regime filter buttons ── */
+.regime-filters {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.regime-filters .filter-label {
+    font-size: 12px;
+    color: #8b949e;
+    margin-right: 4px;
+}
+
+.regime-btn {
+    padding: 5px 14px;
+    border: 2px solid;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: transparent;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.regime-btn-quiet {
+    color: #2ecc71;
+    border-color: #2ecc71;
+}
+
+.regime-btn-trending {
+    color: #3498db;
+    border-color: #3498db;
+}
+
+.regime-btn-toxic {
+    color: #e74c3c;
+    border-color: #e74c3c;
+}
+
+.regime-btn:hover {
+    opacity: 0.85;
+    transform: scale(1.03);
+}
+
+.regime-btn.inactive {
+    opacity: 0.3;
+    background: transparent;
+}
+
+/* ── 2×2 Panel grid ── */
+.panel-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 12px;
+}
+
+.panel {
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 8px;
+    overflow: hidden;
+}
+
+.panel:hover {
+    border-color: #58a6ff;
+    transition: border-color 0.3s ease;
+}
+
+/* ── Dash component overrides ── */
+.dash-graph .modebar {
+    top: 4px !important;
+    right: 4px !important;
+}
+
+.rc-slider-track {
+    background-color: #58a6ff !important;
+}
+
+.rc-slider-handle {
+    border-color: #58a6ff !important;
+    background-color: #161b22 !important;
+}
+
+.rc-slider-rail {
+    background-color: #30363d !important;
+}
+
+/* ── Range slider dark style ── */
+.dash-slider .rc-slider-dot {
+    display: none;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #0d1117;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #30363d;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #484f58;
+}
+
+/* ── Responsive ── */
+@media (max-width: 1200px) {
+    .panel-grid {
+        grid-template-columns: 1fr;
+    }
+}
