@@ -1,13 +1,12 @@
-"""Tests for the Plotly Dash dashboard components and mock data."""
+"""Tests for the Plotly Dash dashboard components, mock data, and pipeline."""
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
+from dashboard._constants import REGIME_COLORS, REGIME_NAMES
 from dashboard._mock_data import (
-    REGIME_COLORS,
-    REGIME_NAMES,
     generate_all,
     generate_cumulative_pnl,
     generate_features,
@@ -183,3 +182,64 @@ class TestDiagnosticsPanel:
         )
         # VPIN + OFI + Spread + PnL = 4 scatter traces
         assert len(fig.data) == 4
+
+
+# ---------------------------------------------------------------------------
+# App and CLI tests
+# ---------------------------------------------------------------------------
+
+class TestAppCLI:
+    def test_parse_args_defaults(self):
+        from dashboard.app import parse_args
+        args = parse_args([])
+        assert args.symbol == "BTCUSDT"
+        assert args.start is None
+        assert args.end is None
+        assert args.demo is False
+
+    def test_parse_args_demo(self):
+        from dashboard.app import parse_args
+        args = parse_args(["--demo"])
+        assert args.demo is True
+
+    def test_parse_args_full(self):
+        from dashboard.app import parse_args
+        args = parse_args([
+            "--symbol", "ETHUSDT",
+            "--start", "2025-01-01",
+            "--end", "2025-01-14",
+        ])
+        assert args.symbol == "ETHUSDT"
+        assert args.start == "2025-01-01"
+        assert args.end == "2025-01-14"
+
+    def test_create_app_demo_mode(self):
+        from dashboard.app import create_app, parse_args
+        args = parse_args(["--demo"])
+        app = create_app(args)
+        assert app is not None
+        assert app.title == "LOB Regime Scanner"
+
+    def test_load_data_demo(self):
+        from dashboard.app import load_data, parse_args
+        args = parse_args(["--demo"])
+        data = load_data(args)
+        assert "snapshots" in data
+        assert "features" in data
+        assert "hmm" in data
+        assert "cumulative_pnl" in data
+
+
+# ---------------------------------------------------------------------------
+# Pipeline tests
+# ---------------------------------------------------------------------------
+
+class TestPipeline:
+    def test_no_data_error_when_no_files(self):
+        from dashboard.pipeline import NoDataError, _find_data_files
+        with pytest.raises(NoDataError):
+            _find_data_files("NONEXISTENT_SYMBOL_XYZ")
+
+    def test_no_data_error_is_exception(self):
+        from dashboard.pipeline import NoDataError
+        assert issubclass(NoDataError, Exception)
