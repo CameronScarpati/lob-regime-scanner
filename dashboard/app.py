@@ -5,197 +5,321 @@ overlay, regime state probabilities, 3D depth surface, and toxicity
 diagnostics.
 
 Run with:
-    python -m dashboard.app
+    python -m dashboard.app --symbol BTCUSDT --start 2025-01-01 --end 2025-01-14
+    python -m dashboard.app --demo   # use synthetic mock data
 """
 
 from __future__ import annotations
 
+import argparse
+import logging
 import os
+import sys
 
 from dash import Dash, dcc, html
 
-from dashboard._mock_data import generate_all
 from dashboard.callbacks import register_callbacks
 from dashboard.components.heatmap import create_heatmap_figure
 from dashboard.components.regime_probs import create_regime_probs_figure
 from dashboard.components.depth_surface import create_depth_surface_figure
 from dashboard.components.diagnostics import create_diagnostics_figure
 
-# ---------------------------------------------------------------------------
-# Generate initial data for the layout (callbacks will regenerate on update)
-# ---------------------------------------------------------------------------
-_initial = generate_all(n_timestamps=3600)
+logger = logging.getLogger(__name__)
 
-_snap = _initial["snapshots"]
-_feat = _initial["features"]
-_hmm = _initial["hmm"]
-_pnl = _initial["cumulative_pnl"]
 
 # ---------------------------------------------------------------------------
-# Build initial figures
+# CLI argument parsing
 # ---------------------------------------------------------------------------
-_init_heatmap = create_heatmap_figure(_snap, _hmm["states"])
-_init_regime = create_regime_probs_figure(
-    _feat["timestamp"].values, _hmm["state_probs"], _hmm["transition_matrix"]
-)
-_init_depth = create_depth_surface_figure(_snap, _hmm["states"])
-_init_diag = create_diagnostics_figure(_feat, _hmm["states"], _pnl)
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for the dashboard."""
+    parser = argparse.ArgumentParser(
+        description="LOB Regime Scanner Dashboard",
+    )
+    parser.add_argument(
+        "--symbol",
+        default="BTCUSDT",
+        help="Trading pair symbol (default: BTCUSDT)",
+    )
+    parser.add_argument(
+        "--start",
+        default=None,
+        help="Start date ISO format, e.g. 2025-01-01",
+    )
+    parser.add_argument(
+        "--end",
+        default=None,
+        help="End date ISO format, e.g. 2025-01-14",
+    )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Use synthetic mock data instead of the real pipeline",
+    )
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Host to bind to (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8050,
+        help="Port to listen on (default: 8050)",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable Dash debug mode",
+    )
+    return parser.parse_args(argv)
+
 
 # ---------------------------------------------------------------------------
-# App setup
+# Data loading
 # ---------------------------------------------------------------------------
-app = Dash(
-    __name__,
-    title="LOB Regime Scanner",
-    assets_folder=os.path.join(os.path.dirname(__file__), "assets"),
-)
 
+def load_data(args: argparse.Namespace) -> dict:
+    """Load data from the real pipeline or fall back to mock data.
+
+    Returns the standard dict with keys: snapshots, features, hmm, cumulative_pnl.
+    """
+    if args.demo:
+        logger.info("Running in demo mode with synthetic data")
+        from dashboard._mock_data import generate_all
+        return generate_all(n_timestamps=3600)
+
+    # Try the real pipeline
+    from dashboard.pipeline import NoDataError, run_pipeline
+
+    try:
+        return run_pipeline(
+            symbol=args.symbol,
+            start=args.start,
+            end=args.end,
+        )
+    except NoDataError as exc:
+        print(
+            f"\n*** No data available ***\n\n{exc}\n\n"
+            "To use synthetic data instead, run with --demo:\n"
+            "  python -m dashboard.app --demo\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# App factory
+# ---------------------------------------------------------------------------
+
+def create_app(args: argparse.Namespace | None = None) -> Dash:
+    """Build and return the Dash app with layout and callbacks registered.
+
+    If *args* is ``None``, defaults to ``--demo`` mode (for tests / imports).
+    """
+    if args is None:
+        args = parse_args(["--demo"])
+
+    data = load_data(args)
+
+    snap = data["snapshots"]
+    feat = data["features"]
+    hmm = data["hmm"]
+    pnl = data["cumulative_pnl"]
+
+    # Build initial figures
+    init_heatmap = create_heatmap_figure(snap, hmm["states"])
+    init_regime = create_regime_probs_figure(
+        feat["timestamp"].values, hmm["state_probs"], hmm["transition_matrix"]
+    )
+    init_depth = create_depth_surface_figure(snap, hmm["states"])
+    init_diag = create_diagnostics_figure(feat, hmm["states"], pnl)
+
+    # Determine data source label
+    if args.demo:
+        source_label = "Mock / Synthetic Data"
+    else:
+        source_label = f"Real Data ({args.symbol})"
+
+    date_label = ""
+    if args.start and args.end:
+        date_label = f"{args.start} – {args.end}"
+    elif args.start:
+        date_label = f"{args.start} – ..."
+    elif args.end:
+        date_label = f"... – {args.end}"
+    else:
+        date_label = "Full range"
+
+    # Build app
+    dash_app = Dash(
+        __name__,
+        title="LOB Regime Scanner",
+        assets_folder=os.path.join(os.path.dirname(__file__), "assets"),
+    )
+
+    dash_app.layout = html.Div(
+        id="app-container",
+        children=[
+            # ── Header ──
+            html.Div(
+                className="dashboard-header",
+                children=[
+                    html.H1("LOB Regime Scanner"),
+                    html.Div(
+                        className="header-meta",
+                        children=[
+                            html.Span([
+                                html.Span("Instrument", className="label"),
+                                f" {args.symbol} Perp",
+                            ]),
+                            html.Span([
+                                html.Span("Date", className="label"),
+                                f" {date_label}",
+                            ]),
+                            html.Span([
+                                html.Span("Model", className="label"),
+                                " GaussianHMM (3 states, full cov)",
+                            ]),
+                            html.Span([
+                                html.Span("Source", className="label"),
+                                f" {source_label}",
+                            ]),
+                        ],
+                    ),
+                ],
+            ),
+            # ── Controls bar ──
+            html.Div(
+                className="controls-bar",
+                children=[
+                    html.Div(
+                        className="slider-container",
+                        children=[
+                            html.Div("Date Range", className="slider-label"),
+                            dcc.RangeSlider(
+                                id="date-range-slider",
+                                min=0,
+                                max=len(snap) - 1,
+                                step=1,
+                                value=[0, len(snap) - 1],
+                                marks={
+                                    0: "Start",
+                                    len(snap) // 4: "25%",
+                                    len(snap) // 2: "50%",
+                                    3 * len(snap) // 4: "75%",
+                                    len(snap) - 1: "End",
+                                },
+                                tooltip={
+                                    "placement": "bottom",
+                                    "always_visible": False,
+                                },
+                            ),
+                        ],
+                    ),
+                    html.Div(
+                        className="regime-filters",
+                        children=[
+                            html.Span("Regimes:", className="filter-label"),
+                            html.Button(
+                                "Quiet",
+                                id="regime-quiet-btn",
+                                className="regime-btn regime-btn-quiet",
+                                n_clicks=0,
+                            ),
+                            html.Button(
+                                "Trending",
+                                id="regime-trending-btn",
+                                className="regime-btn regime-btn-trending",
+                                n_clicks=0,
+                            ),
+                            html.Button(
+                                "Toxic",
+                                id="regime-toxic-btn",
+                                className="regime-btn regime-btn-toxic",
+                                n_clicks=0,
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+            # ── 2×2 Panel grid ──
+            html.Div(
+                className="panel-grid",
+                children=[
+                    html.Div(
+                        className="panel",
+                        children=[
+                            dcc.Graph(
+                                id="heatmap-panel",
+                                figure=init_heatmap,
+                                config={
+                                    "displayModeBar": True,
+                                    "scrollZoom": True,
+                                },
+                            ),
+                        ],
+                    ),
+                    html.Div(
+                        className="panel",
+                        children=[
+                            dcc.Graph(
+                                id="regime-probs-panel",
+                                figure=init_regime,
+                                config={"displayModeBar": True},
+                            ),
+                        ],
+                    ),
+                    html.Div(
+                        className="panel",
+                        children=[
+                            dcc.Graph(
+                                id="depth-surface-panel",
+                                figure=init_depth,
+                                config={
+                                    "displayModeBar": True,
+                                    "scrollZoom": True,
+                                },
+                            ),
+                        ],
+                    ),
+                    html.Div(
+                        className="panel",
+                        children=[
+                            dcc.Graph(
+                                id="diagnostics-panel",
+                                figure=init_diag,
+                                config={"displayModeBar": True},
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    # Register interactive callbacks (passes data through closure)
+    register_callbacks(dash_app, data)
+
+    return dash_app
+
+
+# ---------------------------------------------------------------------------
+# Module-level app for import-based usage (``from dashboard.app import app``)
+# Uses demo mode by default to avoid requiring data files on import.
+# ---------------------------------------------------------------------------
+app = create_app()
 server = app.server  # For deployment (gunicorn / waitress)
 
-# ---------------------------------------------------------------------------
-# Layout
-# ---------------------------------------------------------------------------
-app.layout = html.Div(
-    id="app-container",
-    children=[
-        # ── Header ──
-        html.Div(
-            className="dashboard-header",
-            children=[
-                html.H1("LOB Regime Scanner"),
-                html.Div(
-                    className="header-meta",
-                    children=[
-                        html.Span([
-                            html.Span("Instrument", className="label"),
-                            " BTCUSDT Perp",
-                        ]),
-                        html.Span([
-                            html.Span("Date", className="label"),
-                            " 2025-01-15",
-                        ]),
-                        html.Span([
-                            html.Span("Model", className="label"),
-                            " GaussianHMM (3 states, full cov)",
-                        ]),
-                        html.Span([
-                            html.Span("Source", className="label"),
-                            " Mock / Synthetic Data",
-                        ]),
-                    ],
-                ),
-            ],
-        ),
-        # ── Controls bar ──
-        html.Div(
-            className="controls-bar",
-            children=[
-                html.Div(
-                    className="slider-container",
-                    children=[
-                        html.Div("Date Range", className="slider-label"),
-                        dcc.RangeSlider(
-                            id="date-range-slider",
-                            min=0,
-                            max=len(_snap) - 1,
-                            step=1,
-                            value=[0, len(_snap) - 1],
-                            marks={
-                                0: "Start",
-                                len(_snap) // 4: "25%",
-                                len(_snap) // 2: "50%",
-                                3 * len(_snap) // 4: "75%",
-                                len(_snap) - 1: "End",
-                            },
-                            tooltip={"placement": "bottom", "always_visible": False},
-                        ),
-                    ],
-                ),
-                html.Div(
-                    className="regime-filters",
-                    children=[
-                        html.Span("Regimes:", className="filter-label"),
-                        html.Button(
-                            "Quiet",
-                            id="regime-quiet-btn",
-                            className="regime-btn regime-btn-quiet",
-                            n_clicks=0,
-                        ),
-                        html.Button(
-                            "Trending",
-                            id="regime-trending-btn",
-                            className="regime-btn regime-btn-trending",
-                            n_clicks=0,
-                        ),
-                        html.Button(
-                            "Toxic",
-                            id="regime-toxic-btn",
-                            className="regime-btn regime-btn-toxic",
-                            n_clicks=0,
-                        ),
-                    ],
-                ),
-            ],
-        ),
-        # ── 2×2 Panel grid ──
-        html.Div(
-            className="panel-grid",
-            children=[
-                html.Div(
-                    className="panel",
-                    children=[
-                        dcc.Graph(
-                            id="heatmap-panel",
-                            figure=_init_heatmap,
-                            config={"displayModeBar": True, "scrollZoom": True},
-                        ),
-                    ],
-                ),
-                html.Div(
-                    className="panel",
-                    children=[
-                        dcc.Graph(
-                            id="regime-probs-panel",
-                            figure=_init_regime,
-                            config={"displayModeBar": True},
-                        ),
-                    ],
-                ),
-                html.Div(
-                    className="panel",
-                    children=[
-                        dcc.Graph(
-                            id="depth-surface-panel",
-                            figure=_init_depth,
-                            config={
-                                "displayModeBar": True,
-                                "scrollZoom": True,
-                            },
-                        ),
-                    ],
-                ),
-                html.Div(
-                    className="panel",
-                    children=[
-                        dcc.Graph(
-                            id="diagnostics-panel",
-                            figure=_init_diag,
-                            config={"displayModeBar": True},
-                        ),
-                    ],
-                ),
-            ],
-        ),
-    ],
-)
-
-# ---------------------------------------------------------------------------
-# Register callbacks
-# ---------------------------------------------------------------------------
-register_callbacks(app)
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=8050)
+    cli_args = parse_args()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    cli_app = create_app(cli_args)
+    cli_app.run(debug=cli_args.debug, host=cli_args.host, port=cli_args.port)

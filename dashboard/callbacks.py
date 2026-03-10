@@ -9,17 +9,28 @@ from __future__ import annotations
 import numpy as np
 from dash import Dash, Input, Output, State, callback_context, no_update
 
-from dashboard._mock_data import generate_all
 from dashboard.components.heatmap import create_heatmap_figure
 from dashboard.components.regime_probs import create_regime_probs_figure
 from dashboard.components.depth_surface import create_depth_surface_figure
 from dashboard.components.diagnostics import create_diagnostics_figure
 
 
-def register_callbacks(app: Dash) -> None:
-    """Register all Dash callbacks on the given app instance."""
+def register_callbacks(app: Dash, data: dict | None = None) -> None:
+    """Register all Dash callbacks on the given app instance.
 
-    _data = generate_all(n_timestamps=3600)
+    Parameters
+    ----------
+    app : Dash
+        The Dash application.
+    data : dict or None
+        Pipeline output dict with keys: snapshots, features, hmm, cumulative_pnl.
+        If None, falls back to mock data for backwards compatibility.
+    """
+    if data is None:
+        from dashboard._mock_data import generate_all
+        data = generate_all(n_timestamps=3600)
+
+    _data = data
 
     @app.callback(
         [
