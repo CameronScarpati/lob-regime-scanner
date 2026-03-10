@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from dashboard._mock_data import REGIME_COLORS, REGIME_NAMES
+from dashboard._constants import REGIME_COLORS, REGIME_NAMES
 
 
 def _build_volume_matrix(
