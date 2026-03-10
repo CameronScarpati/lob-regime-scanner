@@ -28,6 +28,17 @@ logger = logging.getLogger(__name__)
 
 N_LEVELS = 10  # Number of book levels to include in output snapshots
 
+# Try importing the C++ backend; fall back to pure Python if unavailable.
+try:
+    from src.cpp._lob_cpp import LOBEngine as _CppLOBEngine
+    from src.cpp._lob_cpp import batch_reconstruct as _cpp_batch_reconstruct
+
+    _CPP_AVAILABLE = True
+    logger.info("C++ LOB engine loaded")
+except ImportError:
+    _CPP_AVAILABLE = False
+    logger.debug("C++ LOB engine not available, using pure Python")
+
 
 class OrderBook:
     """In-memory order book maintaining bid and ask price levels.
@@ -138,9 +149,95 @@ class OrderBook:
         return row
 
 
+def _reconstruct_python(
+    events: pd.DataFrame,
+    n_levels: int = N_LEVELS,
+) -> list[dict]:
+    """Pure-Python order book reconstruction (fallback)."""
+    book = OrderBook()
+    snapshots: list[dict] = []
+    current_ts: int = -1
+
+    grouped = events.sort_values(["timestamp_us", "seq"]).groupby(
+        ["timestamp_us", "type", "update_id"], sort=True
+    )
+
+    for (ts_us, rec_type, _uid), group in grouped:
+        ts_us = int(ts_us)
+
+        if rec_type == "snapshot":
+            for side in ("bid", "ask"):
+                side_rows = group[group["side"] == side]
+                if not side_rows.empty:
+                    levels = list(
+                        zip(side_rows["price"].values, side_rows["qty"].values)
+                    )
+                    book.apply_snapshot(side, levels)
+        else:
+            for _, row in group.iterrows():
+                book.update(row["side"], row["price"], row["qty"])
+
+        book.last_update_ts = ts_us
+
+        if ts_us != current_ts:
+            if current_ts >= 0:
+                snapshots.append(book.snapshot_dict(current_ts, n_levels))
+            current_ts = ts_us
+
+    if current_ts >= 0:
+        snapshots.append(book.snapshot_dict(current_ts, n_levels))
+
+    logger.info("Reconstructed %d snapshots (Python)", len(snapshots))
+    return snapshots
+
+
+def _reconstruct_cpp(
+    events: pd.DataFrame,
+    n_levels: int = N_LEVELS,
+) -> list[dict]:
+    """C++ accelerated order book reconstruction."""
+    events = events.sort_values(["timestamp_us", "seq"]).reset_index(drop=True)
+
+    # Encode string columns to int arrays for C++
+    type_map = {"snapshot": 0, "delta": 1}
+    side_map = {"bid": 0, "ask": 1}
+
+    timestamps = events["timestamp_us"].values.astype(np.int64)
+    types = events["type"].map(type_map).values.astype(np.int32)
+    sides = events["side"].map(side_map).values.astype(np.int32)
+    prices = events["price"].values.astype(np.float64)
+    qtys = events["qty"].values.astype(np.float64)
+    update_ids = events["update_id"].values.astype(np.int64)
+
+    result_dict = _cpp_batch_reconstruct(
+        timestamps, types, sides, prices, qtys, update_ids, n_levels
+    )
+
+    # Convert the dict of arrays to a list of dicts (matching Python API)
+    if not result_dict or "timestamp" not in result_dict:
+        return []
+
+    n_rows = len(result_dict["timestamp"])
+    keys = list(result_dict.keys())
+    snapshots = []
+    for i in range(n_rows):
+        row = {}
+        for k in keys:
+            val = result_dict[k][i]
+            if k == "timestamp":
+                row[k] = int(val)
+            else:
+                row[k] = float(val)
+        snapshots.append(row)
+
+    logger.info("Reconstructed %d snapshots (C++)", len(snapshots))
+    return snapshots
+
+
 def reconstruct(
     events: pd.DataFrame,
     n_levels: int = N_LEVELS,
+    use_cpp: bool | None = None,
 ) -> list[dict]:
     """Reconstruct order book snapshots from a stream of events.
 
@@ -151,50 +248,26 @@ def reconstruct(
         events: DataFrame from data_loader with columns:
             timestamp_us, type, side, price, qty, update_id, seq
         n_levels: Number of price levels per side in output.
+        use_cpp: Force C++ (True), force Python (False), or auto-detect (None).
 
     Returns:
         List of snapshot dicts, one per unique timestamp.
     """
-    book = OrderBook()
-    snapshots: list[dict] = []
-    current_ts: int = -1
+    if events.empty:
+        return []
 
-    # Group by (timestamp_us, type, update_id) to handle batch updates
-    grouped = events.sort_values(["timestamp_us", "seq"]).groupby(
-        ["timestamp_us", "type", "update_id"], sort=True
-    )
+    if use_cpp is None:
+        use_cpp = _CPP_AVAILABLE
 
-    for (ts_us, rec_type, _uid), group in grouped:
-        ts_us = int(ts_us)
+    if use_cpp and not _CPP_AVAILABLE:
+        raise RuntimeError(
+            "C++ LOB engine requested but not available. "
+            "Rebuild with: pip install -e '.[dev]'"
+        )
 
-        if rec_type == "snapshot":
-            # Snapshot replaces the full book for each side present
-            for side in ("bid", "ask"):
-                side_rows = group[group["side"] == side]
-                if not side_rows.empty:
-                    levels = list(
-                        zip(side_rows["price"].values, side_rows["qty"].values)
-                    )
-                    book.apply_snapshot(side, levels)
-        else:
-            # Delta: update individual price levels
-            for _, row in group.iterrows():
-                book.update(row["side"], row["price"], row["qty"])
-
-        book.last_update_ts = ts_us
-
-        # Emit a snapshot when we move to a new timestamp
-        if ts_us != current_ts:
-            if current_ts >= 0:
-                snapshots.append(book.snapshot_dict(current_ts, n_levels))
-            current_ts = ts_us
-
-    # Final snapshot
-    if current_ts >= 0:
-        snapshots.append(book.snapshot_dict(current_ts, n_levels))
-
-    logger.info("Reconstructed %d snapshots", len(snapshots))
-    return snapshots
+    if use_cpp:
+        return _reconstruct_cpp(events, n_levels)
+    return _reconstruct_python(events, n_levels)
 
 
 def snapshots_to_dataframe(snapshots: list[dict]) -> pd.DataFrame:
