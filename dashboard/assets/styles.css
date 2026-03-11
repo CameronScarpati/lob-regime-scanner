@@ -85,30 +85,69 @@ body {
     border-radius: 8px;
 }
 
-.controls-bar .slider-container {
+/* ── Time-picker group ── */
+.time-picker-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     flex: 1;
 }
 
-.slider-label-row {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    margin-bottom: 2px;
-}
-
-.controls-bar .slider-label {
+.time-picker-label {
     font-size: 10px;
     color: #7a8490;
     text-transform: uppercase;
     letter-spacing: 1px;
     font-weight: 600;
+    white-space: nowrap;
 }
 
-.slider-readout {
+.time-picker-inputs {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.time-picker-sep {
+    color: #5a6575;
     font-size: 12px;
-    color: #b0b8c4;
+}
+
+.time-dropdown {
+    width: 160px;
+}
+
+.time-dropdown .Select-control {
+    background-color: #111a26 !important;
+    border: 1px solid rgba(92, 156, 245, 0.20) !important;
+    border-radius: 5px !important;
+    color: #b0b8c4 !important;
+    font-size: 12px !important;
     font-variant-numeric: tabular-nums;
-    letter-spacing: 0.3px;
+}
+
+.time-dropdown .Select-value-label,
+.time-dropdown .Select-placeholder {
+    color: #b0b8c4 !important;
+    font-size: 12px !important;
+}
+
+.time-dropdown .Select-menu-outer {
+    background-color: #111a26 !important;
+    border: 1px solid rgba(92, 156, 245, 0.15) !important;
+    max-height: 240px !important;
+}
+
+.time-dropdown .VirtualizedSelectOption {
+    background-color: #111a26 !important;
+    color: #b0b8c4 !important;
+    font-size: 12px !important;
+    font-variant-numeric: tabular-nums;
+}
+
+.time-dropdown .VirtualizedSelectFocusedOption {
+    background-color: rgba(92, 156, 245, 0.15) !important;
+    color: #e0e4ea !important;
 }
 
 /* ── Regime filter buttons ── */
@@ -223,54 +262,6 @@ body {
     padding: 0;
 }
 
-/* ── Range slider: hide the raw-index input boxes ── */
-.dash-slider input[type="number"],
-.dash-slider .rc-slider-input,
-.rc-slider-input {
-    display: none !important;
-}
-
-.rc-slider-track {
-    background-color: #5C9CF5 !important;
-    height: 4px !important;
-}
-
-.rc-slider-handle {
-    border-color: #5C9CF5 !important;
-    background-color: #0d1420 !important;
-    width: 14px !important;
-    height: 14px !important;
-    margin-top: -5px !important;
-    border-width: 2px !important;
-    opacity: 1 !important;
-}
-
-.rc-slider-handle:hover,
-.rc-slider-handle:active,
-.rc-slider-handle-dragging {
-    border-color: #7db8ff !important;
-    box-shadow: 0 0 4px rgba(92, 156, 245, 0.4) !important;
-}
-
-.rc-slider-rail {
-    background-color: #1c2736 !important;
-    height: 4px !important;
-}
-
-/* ── Range slider: clean tick marks ── */
-.dash-slider .rc-slider-dot {
-    display: none;
-}
-
-.dash-slider .rc-slider-mark-text {
-    color: #8a95a5 !important;
-    font-size: 11px !important;
-}
-
-/* ── Hide any tooltip popups showing raw indices ── */
-.rc-slider-tooltip {
-    display: none !important;
-}
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar {

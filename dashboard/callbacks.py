@@ -41,7 +41,8 @@ def register_callbacks(app: Dash, data: dict | None = None) -> None:
             Output("diagnostics-panel", "figure"),
         ],
         [
-            Input("date-range-slider", "value"),
+            Input("time-start-dropdown", "value"),
+            Input("time-end-dropdown", "value"),
             Input("regime-quiet-btn", "n_clicks"),
             Input("regime-trending-btn", "n_clicks"),
             Input("regime-toxic-btn", "n_clicks"),
@@ -53,7 +54,8 @@ def register_callbacks(app: Dash, data: dict | None = None) -> None:
         ],
     )
     def update_panels(
-        date_range,
+        start_val,
+        end_val,
         quiet_clicks,
         trending_clicks,
         toxic_clicks,
@@ -66,8 +68,9 @@ def register_callbacks(app: Dash, data: dict | None = None) -> None:
         hmm = _data["hmm"]
         cum_pnl = _data["cumulative_pnl"]
 
-        # Apply date range slider
-        start_idx, end_idx = date_range if date_range else (0, len(snapshots) - 1)
+        # Apply time range from dropdowns
+        start_idx = int(start_val) if start_val is not None else 0
+        end_idx = int(end_val) if end_val is not None else len(snapshots) - 1
         sl = slice(start_idx, end_idx + 1)
 
         snap_sub = snapshots.iloc[sl].reset_index(drop=True)
@@ -148,23 +151,3 @@ def register_callbacks(app: Dash, data: dict | None = None) -> None:
             return "regime-btn regime-btn-toxic"
         return "regime-btn regime-btn-toxic inactive"
 
-    # ── Live time-window readout ──
-    timestamps = _data["snapshots"]["timestamp"]
-    ts_start = pd.Timestamp(timestamps.iloc[0])
-    ts_end = pd.Timestamp(timestamps.iloc[-1])
-    _same_day = ts_start.date() == ts_end.date()
-
-    def _fmt_ts(idx: int) -> str:
-        """Format a slider index as a human-readable timestamp."""
-        ts = pd.Timestamp(timestamps.iloc[min(idx, len(timestamps) - 1)])
-        if _same_day:
-            return ts.strftime("%-H:%M:%S")
-        return ts.strftime("%b %-d, %Y  %H:%M:%S")
-
-    @app.callback(
-        Output("time-window-readout", "children"),
-        Input("date-range-slider", "value"),
-    )
-    def update_time_readout(date_range):
-        start_idx, end_idx = date_range if date_range else (0, len(timestamps) - 1)
-        return f"{_fmt_ts(start_idx)}  –  {_fmt_ts(end_idx)}"

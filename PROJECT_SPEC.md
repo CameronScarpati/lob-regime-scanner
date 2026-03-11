@@ -177,7 +177,7 @@ After decoding regimes, compute:
 ### 3.3 Simple Regime-Conditional Trading Signal
 
 Backtest a minimal strategy to demonstrate the regime detection has alpha:
-- When the model detects a transition from Quiet → Trending, enter a position in the direction of OFI
+- When the model detects a transition from Quiet-to-Trending, enter a position in the direction of OFI
 - When the model detects Toxic/Stressed, flatten all positions
 - Compute Sharpe ratio, max drawdown, hit rate, and profit per trade
 - **Important:** this is NOT the point of the project — the regime detection and visualization are. The backtest is a validation that the detected regimes contain useful information. Keep it simple.
@@ -267,7 +267,7 @@ lob-regime-scanner/
 │   └── raw/                    # Raw downloaded files
 ├── src/
 │   ├── __init__.py
-│   ├── data_loader.py          # Parse Bybit L2 data → DataFrames
+│   ├── data_loader.py          # Parse Bybit L2 data > DataFrames
 │   ├── book_reconstructor.py   # Build LOB snapshots from updates
 │   ├── features.py             # All feature computations (OFI, VPIN, etc.)
 │   ├── hmm_model.py            # HMM fitting, decoding, diagnostics

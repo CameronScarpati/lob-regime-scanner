@@ -1,4 +1,4 @@
-"""Full data pipeline: load → reconstruct → features → HMM → backtest.
+"""Full data pipeline: load > reconstruct > features > HMM > backtest.
 
 Wires the src modules together and produces DataFrames in the schema
 expected by the dashboard components.
@@ -210,7 +210,7 @@ def run_pipeline(
     # Build features DataFrame with the column names the dashboard expects
     feat_out = pd.DataFrame({"timestamp": snap_out["timestamp"].values})
 
-    # Map real feature column names → dashboard expected names
+    # Map real feature column names to dashboard expected names
     col_map = {
         "ofi_1": "OFI_1",
         "ofi_5": "OFI_5",

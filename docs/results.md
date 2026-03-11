@@ -78,7 +78,7 @@ From Quiet   0.96     0.03     0.01
 
 **Observations:**
 - **High diagonal dominance:** All regimes are persistent. Quiet is the most stable (96% self-transition probability), consistent with normal market conditions being the baseline.
-- **Asymmetric entry/exit:** The Toxic regime has only a 1% probability of being reached directly from Quiet, but once entered, it persists (85% self-transition). This asymmetry reflects the empirical observation that microstructure stress events build gradually (Quiet → Trending → Toxic) but resolve abruptly (Toxic → Quiet at 10%).
+- **Asymmetric entry/exit:** The Toxic regime has only a 1% probability of being reached directly from Quiet, but once entered, it persists (85% self-transition). This asymmetry reflects the empirical observation that microstructure stress events build gradually (Quiet > Trending > Toxic) but resolve abruptly (Toxic > Quiet at 10%).
 - **Duration statistics:**
   - Quiet regime: mean duration ~25 seconds per episode
   - Trending regime: mean duration ~10 seconds per episode
@@ -88,7 +88,7 @@ From Quiet   0.96     0.03     0.01
 
 ## 6. Backtest Validation
 
-The regime-conditional strategy validates that detected regimes contain actionable information. The strategy is intentionally simple — enter on Quiet → Trending transitions in the OFI direction, exit on Toxic detection:
+The regime-conditional strategy validates that detected regimes contain actionable information. The strategy is intentionally simple — enter on Quiet-to-Trending transitions in the OFI direction, exit on Toxic detection:
 
 | Metric | Value |
 |--------|-------|
