@@ -51,6 +51,13 @@ body {
     background: #2d3f52;
 }
 
+/* ── RangeSlider: mark labels ── */
+.mantine-RangeSlider-markLabel {
+    font-size: 10px;
+    color: #5c6775;
+    margin-top: 4px;
+}
+
 /* ── Responsive: stack panels on narrow screens ── */
 @media (max-width: 1200px) {
     .mantine-SimpleGrid-root {
