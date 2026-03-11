@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.data_loader import load, load_directory
+from src.data_loader import load, load_directory, load_snapshots, load_snapshots_directory
 
 
 def _make_tardis_csv_gz(
@@ -155,3 +155,109 @@ class TestLoadDirectory:
     def test_empty_directory(self, tmp_path):
         df = load_directory(tmp_path)
         assert len(df) == 0
+
+
+# ---------------------------------------------------------------------------
+# load_snapshots (direct Tardis → snapshots DataFrame)
+# ---------------------------------------------------------------------------
+
+class TestLoadSnapshots:
+    def test_produces_snapshots_schema(self, tmp_path):
+        path = tmp_path / "book_snapshot_25_test.csv.gz"
+        _make_tardis_csv_gz(path, n_levels=5, n_rows=3)
+
+        df = load_snapshots(path, n_levels=3, sample_interval_us=0)
+
+        assert len(df) == 3
+        assert "timestamp" in df.columns
+        assert "mid_price" in df.columns
+        assert "spread" in df.columns
+        assert "bid_price_1" in df.columns
+        assert "ask_price_1" in df.columns
+        assert "bid_qty_3" in df.columns
+        assert "ask_qty_3" in df.columns
+
+    def test_mid_price_and_spread(self, tmp_path):
+        path = tmp_path / "book_snapshot_25_test.csv.gz"
+        _make_tardis_csv_gz(path, n_levels=1, n_rows=1, base_price=50000.0)
+
+        df = load_snapshots(path, n_levels=1, sample_interval_us=0)
+
+        # ask = 50000.50, bid = 49999.50
+        assert df["mid_price"].iloc[0] == pytest.approx(50000.0)
+        assert df["spread"].iloc[0] == pytest.approx(1.0)
+
+    def test_subsampling(self, tmp_path):
+        path = tmp_path / "book_snapshot_25_test.csv.gz"
+        # 10 rows, 1μs apart — with 5μs interval should keep ~2-3
+        _make_tardis_csv_gz(path, n_levels=1, n_rows=10,
+                            base_ts_us=1700000000000000)
+
+        # Rows are 1s apart (1_000_000 μs), interval=3s → ~4 rows
+        df = load_snapshots(path, n_levels=1, sample_interval_us=3_000_000)
+        assert len(df) == 4  # t=0, t=3, t=6, t=9
+
+    def test_no_subsampling(self, tmp_path):
+        path = tmp_path / "book_snapshot_25_test.csv.gz"
+        _make_tardis_csv_gz(path, n_levels=1, n_rows=5)
+
+        df = load_snapshots(path, n_levels=1, sample_interval_us=0)
+        assert len(df) == 5
+
+    def test_n_levels_capped_to_available(self, tmp_path):
+        path = tmp_path / "book_snapshot_25_test.csv.gz"
+        _make_tardis_csv_gz(path, n_levels=3, n_rows=1)
+
+        # Request 10 levels, but only 3 available
+        df = load_snapshots(path, n_levels=10, sample_interval_us=0)
+        assert "bid_price_3" in df.columns
+        assert "bid_price_4" not in df.columns
+
+    def test_empty_file(self, tmp_path):
+        path = tmp_path / "book_snapshot_25_test.csv.gz"
+        _make_tardis_csv_gz(path, n_levels=3, n_rows=0)
+
+        df = load_snapshots(path, sample_interval_us=0)
+        assert df.empty
+
+    def test_max_rows(self, tmp_path):
+        path = tmp_path / "book_snapshot_25_test.csv.gz"
+        _make_tardis_csv_gz(path, n_levels=1, n_rows=10)
+
+        df = load_snapshots(path, n_levels=1, max_rows=3, sample_interval_us=0)
+        assert len(df) == 3
+
+
+class TestLoadSnapshotsDirectory:
+    def test_loads_multiple_files(self, tmp_path):
+        _make_tardis_csv_gz(
+            tmp_path / "bybit_book_snapshot_25_2024-01-01_BTCUSDT.csv.gz",
+            n_levels=3, n_rows=2,
+        )
+        _make_tardis_csv_gz(
+            tmp_path / "bybit_book_snapshot_25_2024-01-02_BTCUSDT.csv.gz",
+            n_levels=3, n_rows=3,
+            base_ts_us=1700100000000000,
+        )
+
+        df = load_snapshots_directory(tmp_path, n_levels=3, sample_interval_us=0)
+        assert len(df) == 5
+
+    def test_filters_by_symbol(self, tmp_path):
+        _make_tardis_csv_gz(
+            tmp_path / "bybit_book_snapshot_25_2024-01-01_BTCUSDT.csv.gz",
+            n_levels=3, n_rows=2,
+        )
+        _make_tardis_csv_gz(
+            tmp_path / "bybit_book_snapshot_25_2024-01-01_ETHUSDT.csv.gz",
+            n_levels=3, n_rows=3,
+        )
+
+        df = load_snapshots_directory(
+            tmp_path, symbol="BTCUSDT", n_levels=3, sample_interval_us=0
+        )
+        assert len(df) == 2
+
+    def test_empty_directory(self, tmp_path):
+        df = load_snapshots_directory(tmp_path)
+        assert df.empty

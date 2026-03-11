@@ -4,8 +4,10 @@ Handles Tardis book_snapshot CSV (.csv.gz) — Pre-reconstructed snapshots
 from tardis.dev with columns: timestamp, local_timestamp,
 asks[0..N].price, asks[0..N].amount, bids[0..N].price, bids[0..N].amount.
 
-The primary output is a DataFrame of order book events that can be
-fed into the BookReconstructor.
+Provides two loading paths:
+  - load(): Expands into per-level events for BookReconstructor (slow, legacy)
+  - load_snapshots(): Converts directly to the snapshots DataFrame format
+    used by the features pipeline — much faster, skips reconstruct step.
 """
 
 import gzip
@@ -16,6 +18,9 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# Default: keep one snapshot per second (matches pipeline resample interval)
+DEFAULT_SAMPLE_INTERVAL_US = 1_000_000
 
 
 def load(path: Path | str, max_rows: int | None = None) -> pd.DataFrame:
@@ -172,4 +177,162 @@ def load_directory(
         df = df.sort_values("timestamp_us").reset_index(drop=True)
 
     logger.info("Loaded %d total rows from %d files", len(df), len(files))
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Direct snapshots loading (skips expand→reconstruct round-trip)
+# ---------------------------------------------------------------------------
+
+def _detect_levels(columns: list[str]) -> tuple[list[str], list[str]]:
+    """Detect ask and bid price columns from CSV headers."""
+    ask_cols = sorted(
+        [c for c in columns if c.startswith("asks[") and c.endswith("].price")],
+        key=lambda c: int(c.split("[")[1].split("]")[0]),
+    )
+    bid_cols = sorted(
+        [c for c in columns if c.startswith("bids[") and c.endswith("].price")],
+        key=lambda c: int(c.split("[")[1].split("]")[0]),
+    )
+    return ask_cols, bid_cols
+
+
+def load_snapshots(
+    path: Path | str,
+    n_levels: int = 10,
+    sample_interval_us: int = DEFAULT_SAMPLE_INTERVAL_US,
+    max_rows: int | None = None,
+) -> pd.DataFrame:
+    """Load Tardis book_snapshot CSV directly into snapshots DataFrame format.
+
+    Converts directly to the schema used by the features pipeline, without
+    the intermediate expand→reconstruct step. Much faster for large files.
+
+    Args:
+        path: Path to the Tardis CSV (.csv.gz or .csv).
+        n_levels: Number of book levels per side in output (default 10).
+        sample_interval_us: Keep one snapshot per this many microseconds
+            (default 1_000_000 = 1s). Set to 0 to keep all rows.
+        max_rows: If set, only read this many CSV rows before subsampling.
+
+    Returns:
+        DataFrame with columns:
+            timestamp: int64 (microseconds since epoch)
+            mid_price: float64
+            spread: float64
+            bid_price_1..N, bid_qty_1..N: float64
+            ask_price_1..N, ask_qty_1..N: float64
+    """
+    path = Path(path)
+
+    read_kwargs = {}
+    if max_rows is not None:
+        read_kwargs["nrows"] = max_rows
+
+    logger.info("Reading %s ...", path.name)
+    df = pd.read_csv(path, **read_kwargs)
+
+    if df.empty:
+        return pd.DataFrame()
+
+    # Timestamps
+    ts_col = "timestamp" if "timestamp" in df.columns else df.columns[0]
+    timestamps = df[ts_col].values.astype(np.int64)
+    if timestamps.max() < 1e15:
+        timestamps = timestamps * 1000
+
+    # Subsample: keep one row per interval
+    if sample_interval_us > 0 and len(timestamps) > 1:
+        keep = np.zeros(len(timestamps), dtype=bool)
+        keep[0] = True
+        last_kept = timestamps[0]
+        for i in range(1, len(timestamps)):
+            if timestamps[i] - last_kept >= sample_interval_us:
+                keep[i] = True
+                last_kept = timestamps[i]
+        df = df.loc[keep].reset_index(drop=True)
+        timestamps = timestamps[keep]
+        logger.info(
+            "Subsampled to %d snapshots (interval=%d μs)",
+            len(df), sample_interval_us,
+        )
+
+    # Detect available levels
+    ask_price_cols, bid_price_cols = _detect_levels(df.columns.tolist())
+    n_avail_ask = len(ask_price_cols)
+    n_avail_bid = len(bid_price_cols)
+    n_out = min(n_levels, n_avail_ask, n_avail_bid)
+
+    # Build output DataFrame
+    result = pd.DataFrame({"timestamp": timestamps})
+
+    # Extract price/qty arrays for top N levels
+    for i in range(n_out):
+        ask_p = df[f"asks[{i}].price"].values.astype(np.float64)
+        ask_q = df[f"asks[{i}].amount"].values.astype(np.float64)
+        bid_p = df[f"bids[{i}].price"].values.astype(np.float64)
+        bid_q = df[f"bids[{i}].amount"].values.astype(np.float64)
+
+        result[f"ask_price_{i + 1}"] = ask_p
+        result[f"ask_qty_{i + 1}"] = ask_q
+        result[f"bid_price_{i + 1}"] = bid_p
+        result[f"bid_qty_{i + 1}"] = bid_q
+
+    # Compute mid_price and spread from best bid/ask
+    result["mid_price"] = (result["bid_price_1"] + result["ask_price_1"]) / 2.0
+    result["spread"] = result["ask_price_1"] - result["bid_price_1"]
+
+    logger.info(
+        "Loaded %d snapshots from %s (%d levels/side, ts range %.1fs)",
+        len(result),
+        path.name,
+        n_out,
+        (timestamps[-1] - timestamps[0]) / 1e6 if len(timestamps) > 1 else 0,
+    )
+    return result
+
+
+def load_snapshots_directory(
+    directory: Path | str,
+    symbol: str | None = None,
+    n_levels: int = 10,
+    sample_interval_us: int = DEFAULT_SAMPLE_INTERVAL_US,
+    **kwargs,
+) -> pd.DataFrame:
+    """Load all Tardis CSV files from a directory into a single snapshots DataFrame.
+
+    Args:
+        directory: Path to directory containing CSV files.
+        symbol: If set, only load files matching this symbol.
+        n_levels: Number of book levels per side.
+        sample_interval_us: Subsampling interval in microseconds.
+        **kwargs: Passed to load_snapshots().
+
+    Returns:
+        Concatenated snapshots DataFrame sorted by timestamp.
+    """
+    directory = Path(directory)
+    files = []
+    for pattern in ["*.csv.gz", "*.csv"]:
+        files.extend(directory.glob(pattern))
+
+    if symbol:
+        files = [f for f in files if symbol.upper() in f.name.upper()]
+
+    files = sorted(set(files))
+
+    if not files:
+        logger.warning("No data files found in %s", directory)
+        return pd.DataFrame()
+
+    frames = []
+    for f in files:
+        frames.append(
+            load_snapshots(f, n_levels=n_levels,
+                           sample_interval_us=sample_interval_us, **kwargs)
+        )
+
+    df = pd.concat(frames, ignore_index=True)
+    df = df.sort_values("timestamp").reset_index(drop=True)
+    logger.info("Loaded %d total snapshots from %d files", len(df), len(files))
     return df
