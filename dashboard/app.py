@@ -34,9 +34,37 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _fmt_time(ts) -> str:
-    """Format a timestamp as HH:MM:SS for TimeInput value."""
-    return pd.Timestamp(ts).strftime("%H:%M:%S")
+def _build_time_options(
+    timestamps: pd.Series,
+    max_options: int = 80,
+) -> list[dict[str, str]]:
+    """Build Select options by sampling timestamps at even intervals.
+
+    Always includes the first and last timestamp.  The number of
+    options is capped at *max_options* to keep the dropdown usable.
+    """
+    n = len(timestamps)
+    if n == 0:
+        return []
+
+    step = max(1, n // max_options)
+    indices = list(range(0, n, step))
+    if indices[-1] != n - 1:
+        indices.append(n - 1)
+
+    ts_start = pd.Timestamp(timestamps.iloc[0])
+    ts_end = pd.Timestamp(timestamps.iloc[-1])
+    same_day = ts_start.date() == ts_end.date()
+
+    options: list[dict[str, str]] = []
+    for idx in indices:
+        ts = pd.Timestamp(timestamps.iloc[idx])
+        if same_day:
+            label = ts.strftime("%-H:%M:%S")
+        else:
+            label = ts.strftime("%b %-d %H:%M:%S")
+        options.append({"label": label, "value": str(idx)})
+    return options
 
 
 def _make_panel(title: str, description: str, graph_id: str, figure, config: dict):
@@ -168,9 +196,8 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
     init_depth = create_depth_surface_figure(snap, hmm["states"])
     init_diag = create_diagnostics_figure(feat, hmm["states"], pnl)
 
-    # Format boundary times for the time inputs
-    time_start = _fmt_time(snap["timestamp"].iloc[0])
-    time_end = _fmt_time(snap["timestamp"].iloc[-1])
+    # Build time picker options (sampled to ~80 entries)
+    time_options = _build_time_options(snap["timestamp"])
 
     # Determine data source label
     if args.demo:
@@ -286,21 +313,23 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                                 tt="uppercase",
                                                 style={"letterSpacing": "0.08em"},
                                             ),
-                                            dmc.TimeInput(
-                                                id="time-start-input",
-                                                value=time_start,
-                                                minTime=time_start,
-                                                maxTime=time_end,
-                                                w=110,
+                                            dmc.Select(
+                                                id="time-start-select",
+                                                data=time_options,
+                                                value=time_options[0]["value"],
+                                                searchable=True,
+                                                clearable=False,
+                                                w=130,
                                                 size="xs",
                                             ),
                                             dmc.Text("to", size="sm", c="dimmed"),
-                                            dmc.TimeInput(
-                                                id="time-end-input",
-                                                value=time_end,
-                                                minTime=time_start,
-                                                maxTime=time_end,
-                                                w=110,
+                                            dmc.Select(
+                                                id="time-end-select",
+                                                data=time_options,
+                                                value=time_options[-1]["value"],
+                                                searchable=True,
+                                                clearable=False,
+                                                w=130,
                                                 size="xs",
                                             ),
                                         ],
