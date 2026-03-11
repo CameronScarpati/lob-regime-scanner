@@ -105,6 +105,8 @@ def run_pipeline(
         data_dir,
         symbol=symbol,
         sample_interval_us=sample_interval_us,
+        start=start,
+        end=end,
     )
     if snap_df.empty:
         raise NoDataError(f"Loaded 0 snapshots for {symbol}. Check your data files.")
