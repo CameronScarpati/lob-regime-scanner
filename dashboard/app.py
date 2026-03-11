@@ -34,27 +34,9 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _build_time_options(
-    timestamps: pd.Series,
-) -> list[dict[str, str]]:
-    """Build Select options from snapshot timestamps."""
-    n = len(timestamps)
-    if n == 0:
-        return []
-
-    ts_start = pd.Timestamp(timestamps.iloc[0])
-    ts_end = pd.Timestamp(timestamps.iloc[-1])
-    same_day = ts_start.date() == ts_end.date()
-
-    options: list[dict[str, str]] = []
-    for i in range(n):
-        ts = pd.Timestamp(timestamps.iloc[i])
-        if same_day:
-            label = ts.strftime("%-H:%M:%S")
-        else:
-            label = ts.strftime("%b %-d %H:%M:%S")
-        options.append({"label": label, "value": str(i)})
-    return options
+def _fmt_time(ts) -> str:
+    """Format a timestamp as HH:MM:SS for TimeInput value."""
+    return pd.Timestamp(ts).strftime("%H:%M:%S")
 
 
 def _make_panel(title: str, description: str, graph_id: str, figure, config: dict):
@@ -186,8 +168,9 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
     init_depth = create_depth_surface_figure(snap, hmm["states"])
     init_diag = create_diagnostics_figure(feat, hmm["states"], pnl)
 
-    # Build time picker options
-    time_options = _build_time_options(snap["timestamp"])
+    # Format boundary times for the time inputs
+    time_start = _fmt_time(snap["timestamp"].iloc[0])
+    time_end = _fmt_time(snap["timestamp"].iloc[-1])
 
     # Determine data source label
     if args.demo:
@@ -303,26 +286,22 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                                 tt="uppercase",
                                                 style={"letterSpacing": "0.08em"},
                                             ),
-                                            dmc.Select(
-                                                id="time-start-dropdown",
-                                                data=time_options,
-                                                value="0",
-                                                searchable=True,
-                                                clearable=False,
-                                                w=155,
+                                            dmc.TimeInput(
+                                                id="time-start-input",
+                                                value=time_start,
+                                                minTime=time_start,
+                                                maxTime=time_end,
+                                                w=110,
                                                 size="xs",
-                                                placeholder="Start",
                                             ),
                                             dmc.Text("to", size="sm", c="dimmed"),
-                                            dmc.Select(
-                                                id="time-end-dropdown",
-                                                data=time_options,
-                                                value=str(len(snap) - 1),
-                                                searchable=True,
-                                                clearable=False,
-                                                w=155,
+                                            dmc.TimeInput(
+                                                id="time-end-input",
+                                                value=time_end,
+                                                minTime=time_start,
+                                                maxTime=time_end,
+                                                w=110,
                                                 size="xs",
-                                                placeholder="End",
                                             ),
                                         ],
                                     ),
