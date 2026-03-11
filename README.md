@@ -90,7 +90,7 @@ python data/download.py --source bybit --symbol BTCUSDT --start 2025-06-01 --end
 │ support       │               │               │                  │
 └───────────────┴───────────────┴───────────────┴──────────────────┘
 
-Data Flow:  Tardis/Bybit L2 → LOB Reconstruction → Feature Matrix → HMM Fit/Decode → Dashboard
+Data Flow:  Tardis/Bybit L2 > LOB Reconstruction > Feature Matrix > HMM Fit/Decode > Dashboard
                  (1M+ updates/s via C++)  (15 features, z-scored)  (EM + Viterbi)
 ```
 
@@ -107,7 +107,7 @@ lob-regime-scanner/
 │   └── cpp/                #   C++ LOB engine (pybind11)
 ├── dashboard/              # Plotly Dash app — 4 synchronized panels
 │   ├── app.py              #   Main app, CLI (--demo, --symbol, --start, --end)
-│   ├── pipeline.py         #   End-to-end data → model → viz wiring
+│   ├── pipeline.py         #   End-to-end data > model > viz wiring
 │   ├── callbacks.py        #   Dash callbacks for interactivity
 │   └── components/         #   Heatmap, regime probs, 3D surface, diagnostics
 ├── data/                   # Data download scripts

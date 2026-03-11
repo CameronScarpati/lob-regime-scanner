@@ -14,7 +14,9 @@ from dashboard._constants import (
     AXIS_STYLE,
     PLOTLY_LAYOUT_DEFAULTS,
     REGIME_COLORS,
+    REGIME_FILLS,
     REGIME_NAMES,
+    XAXIS_STYLE,
 )
 
 
@@ -26,11 +28,7 @@ def _add_regime_backgrounds(
     col: int = 1,
     max_vrects: int = 100,
 ) -> None:
-    """Add semi-transparent regime-colored background rectangles to a subplot.
-
-    Uses vrect shapes for a small number of segments. When there are too many
-    regime transitions, skips background coloring for performance.
-    """
+    """Add semi-transparent regime-colored background rectangles to a subplot."""
     if len(regimes) == 0:
         return
 
@@ -44,11 +42,11 @@ def _add_regime_backgrounds(
     ends = np.concatenate([changes, [len(regimes)]])
 
     for s, e in zip(starts, ends):
-        regime = regimes[s]
+        regime = int(regimes[s])
         fig.add_vrect(
             x0=timestamps[s],
             x1=timestamps[min(e, len(timestamps) - 1)],
-            fillcolor=REGIME_COLORS[int(regime)],
+            fillcolor=REGIME_COLORS[regime],
             opacity=0.07,
             layer="below",
             line_width=0,
@@ -76,14 +74,19 @@ def create_diagnostics_figure(
         rows=4,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.05,
-        subplot_titles=("VPIN", "OFI (Normalized)", "Spread (bps)", "Cumulative PnL"),
+        vertical_spacing=0.055,
+        subplot_titles=(
+            "VPIN  (Volume-Synchronised Probability of Informed Trading)",
+            "Order Flow Imbalance  (Normalised)",
+            "Quoted Spread  (basis points)",
+            "Cumulative Strategy PnL",
+        ),
         row_heights=[0.25, 0.25, 0.22, 0.28],
     )
 
-    # Style subplot titles
+    # Style subplot titles — left-aligned, readable
     for annotation in fig.layout.annotations:
-        annotation.font = dict(size=11, color="#6e7681")
+        annotation.font = dict(size=12, color="#7a8490")
         annotation.xanchor = "left"
         annotation.x = 0.01
 
@@ -93,7 +96,7 @@ def create_diagnostics_figure(
             x=timestamps,
             y=features["VPIN"].values,
             mode="lines",
-            line=dict(color="#e6a817", width=1.0),
+            line=dict(color="#E6A817", width=1.2),
             name="VPIN",
             hovertemplate="VPIN: %{y:.3f}<extra></extra>",
         ),
@@ -103,12 +106,12 @@ def create_diagnostics_figure(
     fig.add_hline(
         y=0.5,
         line_dash="dash",
-        line_color="#ff5252",
+        line_color="#EF6C6C",
         line_width=0.8,
-        opacity=0.5,
-        annotation_text="Alert",
-        annotation_font_size=9,
-        annotation_font_color="#ff5252",
+        opacity=0.50,
+        annotation_text="Alert threshold",
+        annotation_font_size=10,
+        annotation_font_color="#EF6C6C",
         annotation_position="top right",
         row=1,
         col=1,
@@ -121,18 +124,17 @@ def create_diagnostics_figure(
             x=timestamps,
             y=features["OFI_1"].values,
             mode="lines",
-            line=dict(color="#448aff", width=1.0),
+            line=dict(color="#5C9CF5", width=1.2),
             name="OFI",
             hovertemplate="OFI: %{y:.3f}<extra></extra>",
         ),
         row=2,
         col=1,
     )
-    # Add a zero line for reference
     fig.add_hline(
         y=0,
         line_dash="solid",
-        line_color="rgba(255,255,255,0.1)",
+        line_color="rgba(255,255,255,0.10)",
         line_width=0.5,
         row=2,
         col=1,
@@ -146,7 +148,7 @@ def create_diagnostics_figure(
                 line_dash="dot",
                 line_color=color,
                 line_width=0.8,
-                opacity=0.6,
+                opacity=0.55,
                 row=2,
                 col=1,
             )
@@ -158,10 +160,10 @@ def create_diagnostics_figure(
             x=timestamps,
             y=features["spread_bps"].values,
             mode="lines",
-            line=dict(color="#ab47bc", width=1.0),
+            line=dict(color="#AB6DD6", width=1.2),
             name="Spread",
             fill="tozeroy",
-            fillcolor="rgba(171,71,188,0.08)",
+            fillcolor="rgba(171,109,214,0.08)",
             hovertemplate="Spread: %{y:.2f} bps<extra></extra>",
         ),
         row=3,
@@ -170,17 +172,17 @@ def create_diagnostics_figure(
     _add_regime_backgrounds(fig, timestamps, regimes, row=3)
 
     # --- Row 4: Cumulative PnL ---
-    # Color the fill based on whether PnL is positive or negative
-    pnl_color = "#00c853" if cumulative_pnl[-1] >= 0 else "#ff5252"
+    pnl_color = "#4CAF82" if cumulative_pnl[-1] >= 0 else "#EF6C6C"
     pnl_fill = (
-        "rgba(0,200,83,0.12)" if cumulative_pnl[-1] >= 0 else "rgba(255,82,82,0.12)"
+        "rgba(76,175,130,0.10)" if cumulative_pnl[-1] >= 0
+        else "rgba(239,108,108,0.10)"
     )
     fig.add_trace(
         go.Scatter(
             x=timestamps,
             y=cumulative_pnl,
             mode="lines",
-            line=dict(color=pnl_color, width=1.2),
+            line=dict(color=pnl_color, width=1.3),
             fill="tozeroy",
             fillcolor=pnl_fill,
             name="Cum. PnL",
@@ -189,11 +191,10 @@ def create_diagnostics_figure(
         row=4,
         col=1,
     )
-    # Zero line for PnL
     fig.add_hline(
         y=0,
         line_dash="solid",
-        line_color="rgba(255,255,255,0.12)",
+        line_color="rgba(255,255,255,0.10)",
         line_width=0.5,
         row=4,
         col=1,
@@ -203,7 +204,7 @@ def create_diagnostics_figure(
     # Apply consistent axis styles
     for row_num in range(1, 5):
         fig.update_yaxes(row=row_num, col=1, **AXIS_STYLE)
-        fig.update_xaxes(row=row_num, col=1, **AXIS_STYLE)
+        fig.update_xaxes(row=row_num, col=1, **XAXIS_STYLE)
 
     fig.update_yaxes(title_text="VPIN", row=1, col=1)
     fig.update_yaxes(title_text="OFI", row=2, col=1)
@@ -213,8 +214,8 @@ def create_diagnostics_figure(
 
     fig.update_layout(
         **PLOTLY_LAYOUT_DEFAULTS,
-        height=560,
-        margin=dict(l=55, r=16, t=24, b=32),
+        height=540,
+        margin=dict(l=60, r=20, t=24, b=36),
         showlegend=False,
     )
 

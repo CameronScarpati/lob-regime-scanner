@@ -178,7 +178,7 @@ The backtest is designed to validate that detected regimes contain economically 
 
 The signal exploits regime transitions as entry/exit triggers:
 
-- **Entry:** When the model detects a Quiet → Trending transition, enter a position in the direction of OFI (long if OFI > 0, short if OFI < 0).
+- **Entry:** When the model detects a Quiet-to-Trending transition, enter a position in the direction of OFI (long if OFI > 0, short if OFI < 0).
 - **Exit (risk):** When the model detects a Toxic regime, flatten all positions immediately.
 - **Exit (mean-reversion):** When the model detects a return to Quiet, close the position.
 
