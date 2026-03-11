@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-from dashboard._constants import REGIME_COLORS
+from dashboard._constants import PLOTLY_LAYOUT_DEFAULTS, REGIME_COLORS
 
 
 def _build_depth_grid(
@@ -95,8 +95,24 @@ def create_depth_surface_figure(
             colorscale=colorscale,
             cmin=0,
             cmax=2,
-            opacity=0.85,
+            opacity=0.88,
             showscale=False,
+            lighting=dict(
+                ambient=0.5,
+                diffuse=0.6,
+                specular=0.15,
+                roughness=0.6,
+                fresnel=0.1,
+            ),
+            lightposition=dict(x=100, y=200, z=300),
+            contours=dict(
+                z=dict(
+                    show=True,
+                    usecolormap=False,
+                    color="rgba(255,255,255,0.08)",
+                    width=1,
+                ),
+            ),
             hovertemplate=(
                 "Price Offset: %{x:.2f}<br>"
                 "Time Step: %{y}<br>"
@@ -107,16 +123,42 @@ def create_depth_surface_figure(
     )
 
     fig.update_layout(
-        title="3D Order Book Depth Surface",
-        template="plotly_dark",
-        height=480,
-        margin=dict(l=10, r=10, t=40, b=10),
+        **PLOTLY_LAYOUT_DEFAULTS,
+        title=dict(
+            text="3D Order Book Depth Surface",
+            x=0.01, y=0.98,
+            xanchor="left",
+        ),
+        height=560,
+        margin=dict(l=0, r=0, t=36, b=0),
         scene=dict(
-            xaxis_title="Price Offset from Mid",
-            yaxis_title="Time",
-            zaxis_title="Volume",
-            camera=dict(eye=dict(x=1.5, y=-1.8, z=0.8)),
-            bgcolor="#111111",
+            xaxis=dict(
+                title=dict(text="Price Offset from Mid", font=dict(size=10, color="#6e7681")),
+                backgroundcolor="#0c1016",
+                gridcolor="rgba(255,255,255,0.05)",
+                showbackground=True,
+                tickfont=dict(size=9, color="#6e7681"),
+            ),
+            yaxis=dict(
+                title=dict(text="Time", font=dict(size=10, color="#6e7681")),
+                backgroundcolor="#0c1016",
+                gridcolor="rgba(255,255,255,0.05)",
+                showbackground=True,
+                tickfont=dict(size=9, color="#6e7681"),
+            ),
+            zaxis=dict(
+                title=dict(text="Volume", font=dict(size=10, color="#6e7681")),
+                backgroundcolor="#0c1016",
+                gridcolor="rgba(255,255,255,0.05)",
+                showbackground=True,
+                tickfont=dict(size=9, color="#6e7681"),
+            ),
+            camera=dict(
+                eye=dict(x=1.6, y=-1.6, z=0.7),
+                up=dict(x=0, y=0, z=1),
+            ),
+            aspectmode="manual",
+            aspectratio=dict(x=1.2, y=1.5, z=0.7),
         ),
     )
 

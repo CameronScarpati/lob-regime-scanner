@@ -15,8 +15,6 @@ from dashboard._constants import REGIME_COLORS, REGIME_NAMES
 # Constants
 # ---------------------------------------------------------------------------
 N_LEVELS = 10
-REGIME_NAMES = {0: "Quiet", 1: "Trending", 2: "Toxic"}
-REGIME_COLORS = {0: "#2ecc71", 1: "#3498db", 2: "#e74c3c"}
 
 _RNG = np.random.default_rng(42)
 
