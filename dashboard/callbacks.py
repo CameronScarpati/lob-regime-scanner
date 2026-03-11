@@ -7,6 +7,7 @@ and play/pause animation controls.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 from dash import Dash, Input, Output, State, callback_context, no_update
 
 from dashboard.components.heatmap import create_heatmap_figure
@@ -146,3 +147,24 @@ def register_callbacks(app: Dash, data: dict | None = None) -> None:
         if current_cls and "inactive" in current_cls:
             return "regime-btn regime-btn-toxic"
         return "regime-btn regime-btn-toxic inactive"
+
+    # ── Live time-window readout ──
+    timestamps = _data["snapshots"]["timestamp"]
+    ts_start = pd.Timestamp(timestamps.iloc[0])
+    ts_end = pd.Timestamp(timestamps.iloc[-1])
+    _same_day = ts_start.date() == ts_end.date()
+
+    def _fmt_ts(idx: int) -> str:
+        """Format a slider index as a human-readable timestamp."""
+        ts = pd.Timestamp(timestamps.iloc[min(idx, len(timestamps) - 1)])
+        if _same_day:
+            return ts.strftime("%-H:%M:%S")
+        return ts.strftime("%b %-d, %Y  %H:%M:%S")
+
+    @app.callback(
+        Output("time-window-readout", "children"),
+        Input("date-range-slider", "value"),
+    )
+    def update_time_readout(date_range):
+        start_idx, end_idx = date_range if date_range else (0, len(timestamps) - 1)
+        return f"{_fmt_ts(start_idx)}  –  {_fmt_ts(end_idx)}"
