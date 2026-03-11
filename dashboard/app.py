@@ -16,10 +16,11 @@ import logging
 import os
 import sys
 
+import dash_mantine_components as dmc
 import pandas as pd
 from dash import Dash, dcc, html
 
-from dashboard._constants import PANEL_DESCRIPTIONS
+from dashboard._constants import PANEL_DESCRIPTIONS, REGIME_COLORS
 from dashboard.callbacks import register_callbacks
 from dashboard.components.heatmap import create_heatmap_figure
 from dashboard.components.regime_probs import create_regime_probs_figure
@@ -35,15 +36,11 @@ logger = logging.getLogger(__name__)
 
 def _build_time_options(
     timestamps: pd.Series,
-) -> tuple[list[dict[str, str]], bool]:
-    """Build dropdown options from snapshot timestamps.
-
-    Returns (options_list, same_day) where each option has
-    ``{"label": "9:16:07", "value": "0"}`` keyed by integer index.
-    """
+) -> list[dict[str, str]]:
+    """Build Select options from snapshot timestamps."""
     n = len(timestamps)
     if n == 0:
-        return [], True
+        return []
 
     ts_start = pd.Timestamp(timestamps.iloc[0])
     ts_end = pd.Timestamp(timestamps.iloc[-1])
@@ -57,7 +54,28 @@ def _build_time_options(
         else:
             label = ts.strftime("%b %-d %H:%M:%S")
         options.append({"label": label, "value": str(i)})
-    return options, same_day
+    return options
+
+
+def _make_panel(title: str, description: str, graph_id: str, figure, config: dict):
+    """Build a single chart panel with DMC Paper + title + dcc.Graph."""
+    return dmc.Paper(
+        radius="md",
+        withBorder=True,
+        p=0,
+        children=[
+            dmc.Stack(
+                gap=2,
+                p="sm",
+                pb=0,
+                children=[
+                    dmc.Text(title, fw=600, size="sm", c="gray.2"),
+                    dmc.Text(description, size="xs", c="dimmed", lh=1.5),
+                ],
+            ),
+            dcc.Graph(id=graph_id, figure=figure, config=config),
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -169,21 +187,21 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
     init_diag = create_diagnostics_figure(feat, hmm["states"], pnl)
 
     # Build time picker options
-    time_options, _same_day = _build_time_options(snap["timestamp"])
+    time_options = _build_time_options(snap["timestamp"])
 
     # Determine data source label
     if args.demo:
-        source_label = "Mock / Synthetic Data"
+        source_label = "Mock / Synthetic"
     else:
-        source_label = f"Real Data ({args.symbol})"
+        source_label = f"Live ({args.symbol})"
 
     date_label = ""
     if args.start and args.end:
-        date_label = f"{args.start} – {args.end}"
+        date_label = f"{args.start} - {args.end}"
     elif args.start:
-        date_label = f"{args.start} – ..."
+        date_label = f"{args.start} - ..."
     elif args.end:
-        date_label = f"... – {args.end}"
+        date_label = f"... - {args.end}"
     else:
         date_label = "Full range"
 
@@ -194,173 +212,208 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
         assets_folder=os.path.join(os.path.dirname(__file__), "assets"),
     )
 
-    dash_app.layout = html.Div(
-        id="app-container",
-        children=[
-            # ── Header ──
-            html.Div(
-                className="dashboard-header",
-                children=[
-                    html.H1("Limit Order Book Regime Scanner"),
-                    html.Div(
-                        className="header-meta",
-                        children=[
-                            html.Span([
-                                html.Span("Instrument", className="label"),
-                                f" {args.symbol} Perp",
-                            ]),
-                            html.Span([
-                                html.Span("Date", className="label"),
-                                f" {date_label}",
-                            ]),
-                            html.Span([
-                                html.Span("Model", className="label"),
-                                " GaussianHMM (3 states, full cov)",
-                            ]),
-                            html.Span([
-                                html.Span("Source", className="label"),
-                                f" {source_label}",
-                            ]),
-                        ],
-                    ),
+    dash_app.layout = dmc.MantineProvider(
+        id="mantine-provider",
+        forceColorScheme="dark",
+        theme={
+            "primaryColor": "blue",
+            "fontFamily": "Inter, Helvetica Neue, Helvetica, Arial, sans-serif",
+            "colors": {
+                "dark": [
+                    "#c1c7d0",  # dark.0 - lightest text
+                    "#a6adb8",  # dark.1
+                    "#8892a0",  # dark.2
+                    "#5c6775",  # dark.3
+                    "#3a4654",  # dark.4
+                    "#283444",  # dark.5
+                    "#1a2332",  # dark.6 - paper bg
+                    "#111a26",  # dark.7 - card bg
+                    "#0d1420",  # dark.8 - body bg
+                    "#080c12",  # dark.9 - deepest
                 ],
-            ),
-            # ── Controls bar ──
-            html.Div(
-                className="controls-bar",
-                children=[
-                    html.Div(
-                        className="time-picker-group",
-                        children=[
-                            html.Div("Time Window", className="time-picker-label"),
-                            html.Div(
-                                className="time-picker-inputs",
+            },
+        },
+        children=[
+            dmc.Container(
+                id="app-container",
+                size="1860px",
+                px="md",
+                py="sm",
+                children=dmc.Stack(
+                    gap="sm",
+                    children=[
+                        # -- Header --
+                        dmc.Paper(
+                            radius="md",
+                            withBorder=True,
+                            p="sm",
+                            px="lg",
+                            children=dmc.Group(
+                                justify="space-between",
                                 children=[
-                                    dcc.Dropdown(
-                                        id="time-start-dropdown",
-                                        options=time_options,
-                                        value="0",
-                                        clearable=False,
-                                        searchable=True,
-                                        className="time-dropdown",
-                                        placeholder="Start",
+                                    dmc.Title(
+                                        "Limit Order Book Regime Scanner",
+                                        order=4,
+                                        tt="uppercase",
+                                        lts="0.1em",
                                     ),
-                                    html.Span("to", className="time-picker-sep"),
-                                    dcc.Dropdown(
-                                        id="time-end-dropdown",
-                                        options=time_options,
-                                        value=str(len(snap) - 1),
-                                        clearable=False,
-                                        searchable=True,
-                                        className="time-dropdown",
-                                        placeholder="End",
+                                    dmc.Group(
+                                        gap="lg",
+                                        children=[
+                                            dmc.Group(gap=6, children=[
+                                                dmc.Badge("Instrument", size="xs", variant="light"),
+                                                dmc.Text(f"{args.symbol} Perp", size="sm", c="dimmed"),
+                                            ]),
+                                            dmc.Group(gap=6, children=[
+                                                dmc.Badge("Date", size="xs", variant="light"),
+                                                dmc.Text(date_label, size="sm", c="dimmed"),
+                                            ]),
+                                            dmc.Group(gap=6, children=[
+                                                dmc.Badge("Model", size="xs", variant="light"),
+                                                dmc.Text("GaussianHMM (3 states)", size="sm", c="dimmed"),
+                                            ]),
+                                            dmc.Group(gap=6, children=[
+                                                dmc.Badge("Source", size="xs", variant="light"),
+                                                dmc.Text(source_label, size="sm", c="dimmed"),
+                                            ]),
+                                        ],
                                     ),
                                 ],
                             ),
-                        ],
-                    ),
-                    html.Div(
-                        className="regime-filters",
-                        children=[
-                            html.Span("Regimes:", className="filter-label"),
-                            html.Button(
-                                "Quiet",
-                                id="regime-quiet-btn",
-                                className="regime-btn regime-btn-quiet",
-                                n_clicks=0,
+                        ),
+
+                        # -- Controls bar --
+                        dmc.Paper(
+                            radius="md",
+                            withBorder=True,
+                            p="xs",
+                            px="lg",
+                            children=dmc.Group(
+                                justify="space-between",
+                                children=[
+                                    # Time window pickers
+                                    dmc.Group(
+                                        gap="sm",
+                                        children=[
+                                            dmc.Text(
+                                                "Time Window",
+                                                size="xs",
+                                                fw=600,
+                                                c="dimmed",
+                                                tt="uppercase",
+                                                style={"letterSpacing": "0.08em"},
+                                            ),
+                                            dmc.Select(
+                                                id="time-start-dropdown",
+                                                data=time_options,
+                                                value="0",
+                                                searchable=True,
+                                                clearable=False,
+                                                w=155,
+                                                size="xs",
+                                                placeholder="Start",
+                                            ),
+                                            dmc.Text("to", size="sm", c="dimmed"),
+                                            dmc.Select(
+                                                id="time-end-dropdown",
+                                                data=time_options,
+                                                value=str(len(snap) - 1),
+                                                searchable=True,
+                                                clearable=False,
+                                                w=155,
+                                                size="xs",
+                                                placeholder="End",
+                                            ),
+                                        ],
+                                    ),
+
+                                    # Regime filter chips
+                                    dmc.Group(
+                                        gap="sm",
+                                        children=[
+                                            dmc.Text(
+                                                "Regimes",
+                                                size="xs",
+                                                fw=600,
+                                                c="dimmed",
+                                                tt="uppercase",
+                                                style={"letterSpacing": "0.08em"},
+                                            ),
+                                            dmc.ChipGroup(
+                                                id="regime-chip-group",
+                                                value=["quiet", "trending", "toxic"],
+                                                multiple=True,
+                                                children=[
+                                                    dmc.Chip(
+                                                        "Quiet",
+                                                        value="quiet",
+                                                        color=REGIME_COLORS[0],
+                                                        variant="outline",
+                                                        size="xs",
+                                                    ),
+                                                    dmc.Chip(
+                                                        "Trending",
+                                                        value="trending",
+                                                        color=REGIME_COLORS[1],
+                                                        variant="outline",
+                                                        size="xs",
+                                                    ),
+                                                    dmc.Chip(
+                                                        "Toxic",
+                                                        value="toxic",
+                                                        color=REGIME_COLORS[2],
+                                                        variant="outline",
+                                                        size="xs",
+                                                    ),
+                                                ],
+                                            ),
+                                        ],
+                                    ),
+                                ],
                             ),
-                            html.Button(
-                                "Trending",
-                                id="regime-trending-btn",
-                                className="regime-btn regime-btn-trending",
-                                n_clicks=0,
-                            ),
-                            html.Button(
-                                "Toxic",
-                                id="regime-toxic-btn",
-                                className="regime-btn regime-btn-toxic",
-                                n_clicks=0,
-                            ),
-                        ],
-                    ),
-                ],
-            ),
-            # ── 2×2 Panel grid ──
-            html.Div(
-                className="panel-grid",
-                children=[
-                    html.Div(
-                        className="panel",
-                        children=[
-                            html.Div(className="panel-header", children=[
-                                html.Div("Order-Book Heatmap with Regime Overlay",
-                                         className="panel-title"),
-                                html.Div(PANEL_DESCRIPTIONS["heatmap"],
-                                         className="panel-description"),
-                            ]),
-                            dcc.Graph(
-                                id="heatmap-panel",
-                                figure=init_heatmap,
-                                config={
-                                    "displayModeBar": "hover",
-                                    "scrollZoom": True,
-                                    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
-                                },
-                            ),
-                        ],
-                    ),
-                    html.Div(
-                        className="panel",
-                        children=[
-                            html.Div(className="panel-header", children=[
-                                html.Div("Regime Posterior Probabilities",
-                                         className="panel-title"),
-                                html.Div(PANEL_DESCRIPTIONS["regime_probs"],
-                                         className="panel-description"),
-                            ]),
-                            dcc.Graph(
-                                id="regime-probs-panel",
-                                figure=init_regime,
-                                config={"displayModeBar": "hover"},
-                            ),
-                        ],
-                    ),
-                    html.Div(
-                        className="panel",
-                        children=[
-                            html.Div(className="panel-header", children=[
-                                html.Div("3-D Order-Book Depth Surface",
-                                         className="panel-title"),
-                                html.Div(PANEL_DESCRIPTIONS["depth_surface"],
-                                         className="panel-description"),
-                            ]),
-                            dcc.Graph(
-                                id="depth-surface-panel",
-                                figure=init_depth,
-                                config={
-                                    "displayModeBar": "hover",
-                                    "scrollZoom": True,
-                                },
-                            ),
-                        ],
-                    ),
-                    html.Div(
-                        className="panel",
-                        children=[
-                            html.Div(className="panel-header", children=[
-                                html.Div("Microstructure Diagnostics",
-                                         className="panel-title"),
-                                html.Div(PANEL_DESCRIPTIONS["diagnostics"],
-                                         className="panel-description"),
-                            ]),
-                            dcc.Graph(
-                                id="diagnostics-panel",
-                                figure=init_diag,
-                                config={"displayModeBar": "hover"},
-                            ),
-                        ],
-                    ),
-                ],
+                        ),
+
+                        # -- 2x2 Panel grid --
+                        dmc.SimpleGrid(
+                            cols=2,
+                            spacing="sm",
+                            children=[
+                                _make_panel(
+                                    "Order-Book Heatmap with Regime Overlay",
+                                    PANEL_DESCRIPTIONS["heatmap"],
+                                    "heatmap-panel",
+                                    init_heatmap,
+                                    {
+                                        "displayModeBar": "hover",
+                                        "scrollZoom": True,
+                                        "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+                                    },
+                                ),
+                                _make_panel(
+                                    "Regime Posterior Probabilities",
+                                    PANEL_DESCRIPTIONS["regime_probs"],
+                                    "regime-probs-panel",
+                                    init_regime,
+                                    {"displayModeBar": "hover"},
+                                ),
+                                _make_panel(
+                                    "3-D Order-Book Depth Surface",
+                                    PANEL_DESCRIPTIONS["depth_surface"],
+                                    "depth-surface-panel",
+                                    init_depth,
+                                    {"displayModeBar": "hover", "scrollZoom": True},
+                                ),
+                                _make_panel(
+                                    "Microstructure Diagnostics",
+                                    PANEL_DESCRIPTIONS["diagnostics"],
+                                    "diagnostics-panel",
+                                    init_diag,
+                                    {"displayModeBar": "hover"},
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
             ),
         ],
     )

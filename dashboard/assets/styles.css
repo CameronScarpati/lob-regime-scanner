@@ -1,13 +1,11 @@
-/* LOB Regime Scanner Dashboard — Publication-Quality Dark Theme
+/* LOB Regime Scanner Dashboard
  *
- * Design goals:
- *   • Clean enough to screenshot straight into a research paper
- *   • Legible typography with clear visual hierarchy
- *   • Generous whitespace — let the charts breathe
- *   • Muted chrome; vibrant but tasteful data colours
+ * Minimal overrides -- Mantine handles theming via MantineProvider.
+ * Only custom rules here are for Plotly graph integration and
+ * body-level dark background that Mantine doesn't set.
  */
 
-/* ── Reset & base ── */
+/* ── Base ── */
 * {
     box-sizing: border-box;
     margin: 0;
@@ -16,252 +14,23 @@
 
 body {
     background-color: #080c12;
-    color: #d0d6de;
-    font-family: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
-    font-size: 14px;
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── App container ── */
-#app-container {
-    max-width: 1860px;
-    margin: 0 auto;
-    padding: 14px 20px 24px;
-}
-
-/* ── Header ── */
-.dashboard-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 28px;
-    margin-bottom: 10px;
-    background: linear-gradient(135deg, #0d1420 0%, #111c2b 50%, #0d1420 100%);
-    border: 1px solid rgba(92, 156, 245, 0.12);
-    border-radius: 8px;
-}
-
-.dashboard-header h1 {
-    font-size: 22px;
-    font-weight: 700;
-    color: #edf0f5;
-    letter-spacing: 1.6px;
-    text-transform: uppercase;
-    white-space: nowrap;
-}
-
-.header-meta {
-    display: flex;
-    gap: 32px;
-    font-size: 13px;
-    color: #8892a0;
-}
-
-.header-meta span {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-}
-
-.header-meta .label {
-    color: #5C9CF5;
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 10px;
-    letter-spacing: 1px;
-}
-
-/* ── Controls bar ── */
-.controls-bar {
-    display: flex;
-    align-items: center;
-    gap: 20px;
-    padding: 10px 24px;
-    margin-bottom: 10px;
-    background-color: #0d1420;
-    border: 1px solid rgba(92, 156, 245, 0.08);
-    border-radius: 8px;
-}
-
-/* ── Time-picker group ── */
-.time-picker-group {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex: 1;
-}
-
-.time-picker-label {
-    font-size: 10px;
-    color: #7a8490;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    font-weight: 600;
-    white-space: nowrap;
-}
-
-.time-picker-inputs {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.time-picker-sep {
-    color: #5a6575;
-    font-size: 12px;
-}
-
-.time-dropdown {
-    width: 160px;
-}
-
-.time-dropdown .Select-control {
-    background-color: #111a26 !important;
-    border: 1px solid rgba(92, 156, 245, 0.20) !important;
-    border-radius: 5px !important;
-    color: #b0b8c4 !important;
-    font-size: 12px !important;
-    font-variant-numeric: tabular-nums;
-}
-
-.time-dropdown .Select-value-label,
-.time-dropdown .Select-placeholder {
-    color: #b0b8c4 !important;
-    font-size: 12px !important;
-}
-
-.time-dropdown .Select-menu-outer {
-    background-color: #111a26 !important;
-    border: 1px solid rgba(92, 156, 245, 0.15) !important;
-    max-height: 240px !important;
-}
-
-.time-dropdown .VirtualizedSelectOption {
-    background-color: #111a26 !important;
-    color: #b0b8c4 !important;
-    font-size: 12px !important;
-    font-variant-numeric: tabular-nums;
-}
-
-.time-dropdown .VirtualizedSelectFocusedOption {
-    background-color: rgba(92, 156, 245, 0.15) !important;
-    color: #e0e4ea !important;
-}
-
-/* ── Regime filter buttons ── */
-.regime-filters {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
-.regime-filters .filter-label {
-    font-size: 10px;
-    color: #7a8490;
-    margin-right: 4px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    font-weight: 600;
-}
-
-.regime-btn {
-    padding: 5px 16px;
-    border: 1.5px solid;
-    border-radius: 5px;
-    font-size: 11px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    background: transparent;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-}
-
-.regime-btn-quiet {
-    color: #4CAF82;
-    border-color: rgba(76, 175, 130, 0.50);
-}
-
-.regime-btn-trending {
-    color: #5C9CF5;
-    border-color: rgba(92, 156, 245, 0.50);
-}
-
-.regime-btn-toxic {
-    color: #EF6C6C;
-    border-color: rgba(239, 108, 108, 0.50);
-}
-
-.regime-btn:hover {
-    opacity: 0.9;
-    transform: scale(1.02);
-}
-
-.regime-btn.inactive {
-    opacity: 0.25;
-    background: transparent;
-}
-
-/* ── 2x2 Panel grid ── */
-.panel-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto auto;
-    gap: 10px;
-}
-
-.panel {
-    background-color: #0c1119;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 8px;
-    padding: 0;
-    overflow: hidden;
-    transition: border-color 0.25s ease;
-}
-
-.panel:hover {
-    border-color: rgba(92, 156, 245, 0.18);
-}
-
-/* ── Panel header (title + description) ── */
-.panel-header {
-    padding: 14px 20px 8px;
-}
-
-.panel-title {
-    font-size: 14px;
-    font-weight: 700;
-    color: #dce1e8;
-    letter-spacing: 0.3px;
-    margin-bottom: 3px;
-}
-
-.panel-description {
-    font-size: 11.5px;
-    line-height: 1.55;
-    color: #6b7685;
-    max-width: 680px;
-}
-
-/* ── Dash component overrides ── */
+/* ── Plotly mode-bar: subtle until hovered ── */
 .dash-graph .modebar {
     top: 4px !important;
     right: 4px !important;
-    opacity: 0.3;
+    opacity: 0.25;
 }
 
 .dash-graph .modebar:hover {
     opacity: 0.85;
 }
 
-/* Ensure graphs don't have extra padding inside panels */
 .dash-graph {
     margin: 0;
     padding: 0;
 }
-
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar {
@@ -282,9 +51,9 @@ body {
     background: #2d3f52;
 }
 
-/* ── Responsive ── */
+/* ── Responsive: stack panels on narrow screens ── */
 @media (max-width: 1200px) {
-    .panel-grid {
-        grid-template-columns: 1fr;
+    .mantine-SimpleGrid-root {
+        grid-template-columns: 1fr !important;
     }
 }

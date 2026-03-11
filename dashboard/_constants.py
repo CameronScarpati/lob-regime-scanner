@@ -28,7 +28,7 @@ PANEL_DESCRIPTIONS = {
     "regime_probs": (
         "Posterior state probabilities from a 3-state Gaussian HMM "
         "fitted to order-book features (OFI, VPIN, spread, volatility). "
-        "Regimes are not predefined\u2014they are learned by the model and "
+        "Regimes are not predefined -- they are learned by the model and "
         "reordered by variance (Quiet = lowest, Toxic = highest). "
         "The transition matrix (right) shows the estimated probability "
         "of switching between regimes in one time step."
