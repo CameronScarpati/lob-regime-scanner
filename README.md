@@ -41,9 +41,29 @@ python -m dashboard.app --symbol BTCUSDT --start 2025-01-15 --end 2025-01-16
 
 ### Downloading Data
 
+The downloader supports two data sources:
+
+**Tardis.dev (default)** — Professional-grade tick-level data for 40+ crypto exchanges. Free sample data (1st of each month) requires no API key. Full historical access needs a paid key from [tardis.dev](https://tardis.dev).
+
+```bash
+# Download via Tardis.dev (free sample: 1st of any month, no key needed)
+python data/download.py --source tardis --symbol BTCUSDT --start 2025-01-01 --end 2025-01-02
+
+# Download with full Tardis API access
+python data/download.py --source tardis --symbol BTCUSDT --start 2025-01-15 --end 2025-01-21 \
+  --tardis-api-key YOUR_KEY
+# Or set the TARDIS_API_KEY environment variable
+
+# Download from a different exchange (e.g. Binance)
+python data/download.py --source tardis --exchange binance --symbol BTCUSDT \
+  --start 2025-01-01 --end 2025-01-02
+```
+
+**Bybit** — Direct download from Bybit's public archives. Note: archives are only available for recent dates (~May 2025 onward).
+
 ```bash
 # Download Bybit L2 order book data (no API key needed)
-python data/download.py --symbol BTCUSDT --start 2025-01-15 --end 2025-01-21
+python data/download.py --source bybit --symbol BTCUSDT --start 2025-06-01 --end 2025-06-07
 ```
 
 ## Architecture
@@ -54,23 +74,24 @@ python data/download.py --symbol BTCUSDT --start 2025-01-15 --end 2025-01-21
 ├───────────────┬───────────────┬───────────────┬──────────────────┤
 │  Data Layer   │  Feature Eng  │  HMM Engine   │  Dashboard       │
 │               │               │               │                  │
-│ Bybit L2      │ OFI (multi-   │ Gaussian HMM  │ Bookmap-style    │
-│ historical    │   level)      │ (3 states)    │ LOB heatmap      │
-│ data loader   │ VPIN          │               │                  │
-│               │ Spread stats  │ Viterbi path  │ Regime overlay   │
-│ C++ LOB       │ Book imbal.   │ decoding      │ bands            │
-│ reconstruc-   │ Trade flow    │               │                  │
-│ tion engine   │ aggression    │ Forward-       │ 3D depth         │
-│ (pybind11)    │ Kyle's λ      │ backward      │ surface          │
-│               │ Cancel ratio  │ posterior      │                  │
-│ JSONL + CSV   │ Realized vol  │ probabilities │ Toxicity gauge   │
-│ format        │ (multi-freq)  │               │ (VPIN, OFI,      │
-│ support       │ Ret autocorr  │ BIC/AIC model │  spread, PnL)    │
-│               │               │ selection     │                  │
+│ Tardis.dev    │ OFI (multi-   │ Gaussian HMM  │ Bookmap-style    │
+│ (40+ crypto   │   level)      │ (3 states)    │ LOB heatmap      │
+│  exchanges)   │ VPIN          │               │                  │
+│ Bybit L2      │ Spread stats  │ Viterbi path  │ Regime overlay   │
+│ historical    │ Book imbal.   │ decoding      │ bands            │
+│               │ Trade flow    │               │                  │
+│ C++ LOB       │ aggression    │ Forward-       │ 3D depth         │
+│ reconstruc-   │ Kyle's λ      │ backward      │ surface          │
+│ tion engine   │ Cancel ratio  │ posterior      │                  │
+│ (pybind11)    │ Realized vol  │ probabilities │ Toxicity gauge   │
+│               │ (multi-freq)  │               │ (VPIN, OFI,      │
+│ JSONL + CSV   │ Ret autocorr  │ BIC/AIC model │  spread, PnL)    │
+│ format        │               │ selection     │                  │
+│ support       │               │               │                  │
 └───────────────┴───────────────┴───────────────┴──────────────────┘
 
-Data Flow:  Bybit L2 → LOB Reconstruction → Feature Matrix → HMM Fit/Decode → Dashboard
-            (1M+ updates/s via C++)  (15 features, z-scored)  (EM + Viterbi)
+Data Flow:  Tardis/Bybit L2 → LOB Reconstruction → Feature Matrix → HMM Fit/Decode → Dashboard
+                 (1M+ updates/s via C++)  (15 features, z-scored)  (EM + Viterbi)
 ```
 
 ## Project Structure
@@ -78,7 +99,7 @@ Data Flow:  Bybit L2 → LOB Reconstruction → Feature Matrix → HMM Fit/Decod
 ```
 lob-regime-scanner/
 ├── src/                    # Core library
-│   ├── data_loader.py      #   Bybit L2 parser (JSONL + CSV)
+│   ├── data_loader.py      #   Multi-source L2 parser (Tardis, Bybit JSONL + CSV)
 │   ├── book_reconstructor.py   LOB snapshot reconstruction
 │   ├── features.py         #   OFI, VPIN, Kyle's λ, 15 features total
 │   ├── hmm_model.py        #   Gaussian HMM regime detection + diagnostics
@@ -90,7 +111,7 @@ lob-regime-scanner/
 │   ├── callbacks.py        #   Dash callbacks for interactivity
 │   └── components/         #   Heatmap, regime probs, 3D surface, diagnostics
 ├── data/                   # Data download scripts
-│   └── download.py         #   Bybit historical L2 downloader
+│   └── download.py         #   Multi-source downloader (Tardis.dev + Bybit)
 ├── notebooks/              # Analysis notebooks
 │   ├── 01_data_exploration.ipynb
 │   ├── 02_feature_engineering.ipynb
