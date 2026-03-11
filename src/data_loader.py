@@ -10,7 +10,6 @@ Provides two loading paths:
     used by the features pipeline — much faster, skips reconstruct step.
 """
 
-import gzip
 import logging
 from pathlib import Path
 
@@ -84,7 +83,7 @@ def load(path: Path | str, max_rows: int | None = None) -> pd.DataFrame:
 
     # Vectorized extraction — process all rows at once per level
     for side, price_cols in [("ask", ask_price_cols), ("bid", bid_price_cols)]:
-        for i, pcol in enumerate(price_cols):
+        for _i, pcol in enumerate(price_cols):
             acol = pcol.replace(".price", ".amount")
             prices = df[pcol].values.astype(np.float64)
             qtys = df[acol].values.astype(np.float64)
@@ -95,29 +94,29 @@ def load(path: Path | str, max_rows: int | None = None) -> pd.DataFrame:
             if n_valid == 0:
                 continue
 
-            level_df = pd.DataFrame({
-                "timestamp_us": timestamps[mask],
-                "type": "snapshot",
-                "side": side,
-                "price": prices[mask],
-                "qty": qtys[mask],
-                "update_id": np.int64(0),
-                "seq": np.int64(0),
-            })
+            level_df = pd.DataFrame(
+                {
+                    "timestamp_us": timestamps[mask],
+                    "type": "snapshot",
+                    "side": side,
+                    "price": prices[mask],
+                    "qty": qtys[mask],
+                    "update_id": np.int64(0),
+                    "seq": np.int64(0),
+                }
+            )
             frames.append(level_df)
 
     if not frames:
         return pd.DataFrame(
-            columns=["timestamp_us", "type", "side", "price", "qty",
-                      "update_id", "seq"]
+            columns=["timestamp_us", "type", "side", "price", "qty", "update_id", "seq"]
         )
 
     result = pd.concat(frames, ignore_index=True)
     result = result.sort_values("timestamp_us").reset_index(drop=True)
 
     logger.info(
-        "Loaded %d rows from Tardis snapshot %s (%d snapshots, %d+%d levels/side, "
-        "ts range %.3fs)",
+        "Loaded %d rows from Tardis snapshot %s (%d snapshots, %d+%d levels/side, ts range %.3fs)",
         len(result),
         path.name,
         n_rows,
@@ -165,8 +164,7 @@ def load_directory(
     if not files:
         logger.warning("No data files found in %s", directory)
         return pd.DataFrame(
-            columns=["timestamp_us", "type", "side", "price", "qty",
-                      "update_id", "seq"]
+            columns=["timestamp_us", "type", "side", "price", "qty", "update_id", "seq"]
         )
 
     for f in files:
@@ -184,6 +182,7 @@ def load_directory(
 # ---------------------------------------------------------------------------
 # Direct snapshots loading (skips expand→reconstruct round-trip)
 # ---------------------------------------------------------------------------
+
 
 def _detect_levels(columns: list[str]) -> tuple[list[str], list[str]]:
     """Detect ask and bid price columns from CSV headers."""
@@ -255,7 +254,8 @@ def load_snapshots(
         timestamps = timestamps[keep]
         logger.info(
             "Subsampled to %d snapshots (interval=%d μs)",
-            len(df), sample_interval_us,
+            len(df),
+            sample_interval_us,
         )
 
     # Detect available levels
@@ -329,8 +329,7 @@ def load_snapshots_directory(
     frames = []
     for f in files:
         frames.append(
-            load_snapshots(f, n_levels=n_levels,
-                           sample_interval_us=sample_interval_us, **kwargs)
+            load_snapshots(f, n_levels=n_levels, sample_interval_us=sample_interval_us, **kwargs)
         )
 
     df = pd.concat(frames, ignore_index=True)

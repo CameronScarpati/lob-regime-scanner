@@ -18,14 +18,14 @@ import sys
 
 import dash_mantine_components as dmc
 import pandas as pd
-from dash import Dash, dcc, html
+from dash import Dash, dcc
 
 from dashboard._constants import PANEL_DESCRIPTIONS, REGIME_COLORS
 from dashboard.callbacks import register_callbacks
-from dashboard.components.heatmap import create_heatmap_figure
-from dashboard.components.regime_probs import create_regime_probs_figure
 from dashboard.components.depth_surface import create_depth_surface_figure
 from dashboard.components.diagnostics import create_diagnostics_figure
+from dashboard.components.heatmap import create_heatmap_figure
+from dashboard.components.regime_probs import create_regime_probs_figure
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_time_options(
     timestamps: pd.Series,
@@ -86,6 +87,7 @@ def _make_panel(title: str, description: str, graph_id: str, figure, config: dic
 # ---------------------------------------------------------------------------
 # CLI argument parsing
 # ---------------------------------------------------------------------------
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments for the dashboard."""
@@ -143,6 +145,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # Data loading
 # ---------------------------------------------------------------------------
 
+
 def load_data(args: argparse.Namespace) -> dict:
     """Load data from the real pipeline or fall back to mock data.
 
@@ -151,6 +154,7 @@ def load_data(args: argparse.Namespace) -> dict:
     if args.demo:
         logger.info("Running in demo mode with synthetic data")
         from dashboard._mock_data import generate_all
+
         return generate_all(n_timestamps=3600)
 
     # Try the real pipeline
@@ -176,6 +180,7 @@ def load_data(args: argparse.Namespace) -> dict:
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
+
 
 def create_app(args: argparse.Namespace | None = None) -> Dash:
     """Build and return the Dash app with layout and callbacks registered.
@@ -274,32 +279,60 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                     dmc.Group(
                                         gap="lg",
                                         children=[
-                                            dmc.Group(gap=6, children=[
-                                                dmc.Badge("Instrument", size="xs", variant="light"),
-                                                dmc.Text(f"{args.symbol} Perp", size="sm", c="dimmed"),
-                                            ]),
-                                            dmc.Group(gap=6, children=[
-                                                dmc.Badge("Date", size="xs", variant="light"),
-                                                dmc.Text(date_label, size="sm", c="dimmed"),
-                                            ]),
-                                            dmc.Group(gap=6, children=[
-                                                dmc.Badge("Model", size="xs", variant="light"),
-                                                dmc.Text("GaussianHMM (3 states)", size="sm", c="dimmed"),
-                                            ]),
-                                            dmc.Group(gap=6, children=[
-                                                dmc.Badge("Interval", size="xs", variant="light"),
-                                                dmc.Text(f"{args.sample_interval}ms", size="sm", c="dimmed"),
-                                            ]),
-                                            dmc.Group(gap=6, children=[
-                                                dmc.Badge("Source", size="xs", variant="light"),
-                                                dmc.Text(source_label, size="sm", c="dimmed"),
-                                            ]),
+                                            dmc.Group(
+                                                gap=6,
+                                                children=[
+                                                    dmc.Badge(
+                                                        "Instrument", size="xs", variant="light"
+                                                    ),
+                                                    dmc.Text(
+                                                        f"{args.symbol} Perp", size="sm", c="dimmed"
+                                                    ),
+                                                ],
+                                            ),
+                                            dmc.Group(
+                                                gap=6,
+                                                children=[
+                                                    dmc.Badge("Date", size="xs", variant="light"),
+                                                    dmc.Text(date_label, size="sm", c="dimmed"),
+                                                ],
+                                            ),
+                                            dmc.Group(
+                                                gap=6,
+                                                children=[
+                                                    dmc.Badge("Model", size="xs", variant="light"),
+                                                    dmc.Text(
+                                                        "GaussianHMM (3 states)",
+                                                        size="sm",
+                                                        c="dimmed",
+                                                    ),
+                                                ],
+                                            ),
+                                            dmc.Group(
+                                                gap=6,
+                                                children=[
+                                                    dmc.Badge(
+                                                        "Interval", size="xs", variant="light"
+                                                    ),
+                                                    dmc.Text(
+                                                        f"{args.sample_interval}ms",
+                                                        size="sm",
+                                                        c="dimmed",
+                                                    ),
+                                                ],
+                                            ),
+                                            dmc.Group(
+                                                gap=6,
+                                                children=[
+                                                    dmc.Badge("Source", size="xs", variant="light"),
+                                                    dmc.Text(source_label, size="sm", c="dimmed"),
+                                                ],
+                                            ),
                                         ],
                                     ),
                                 ],
                             ),
                         ),
-
                         # -- Controls bar --
                         dmc.Paper(
                             radius="md",
@@ -342,7 +375,6 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                             ),
                                         ],
                                     ),
-
                                     # Regime filter chips
                                     dmc.Group(
                                         gap="sm",
@@ -388,7 +420,6 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                 ],
                             ),
                         ),
-
                         # -- 2x2 Panel grid --
                         dmc.SimpleGrid(
                             cols=2,
