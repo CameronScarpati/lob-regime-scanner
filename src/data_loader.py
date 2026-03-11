@@ -11,6 +11,7 @@ Provides two loading paths:
 """
 
 import logging
+import re
 from pathlib import Path
 
 import numpy as np
@@ -293,11 +294,48 @@ def load_snapshots(
     return result
 
 
+_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+
+def _parse_file_date(path: Path) -> str | None:
+    """Extract the YYYY-MM-DD date string embedded in a filename, or None."""
+    m = _DATE_RE.search(path.stem)
+    return m.group(1) if m else None
+
+
+def _filter_files_by_date(
+    files: list[Path],
+    start: str | None,
+    end: str | None,
+) -> list[Path]:
+    """Keep only files whose embedded date falls within [start, end].
+
+    Files without a parseable date are always included (conservative).
+    """
+    if start is None and end is None:
+        return files
+
+    filtered = []
+    for f in files:
+        file_date = _parse_file_date(f)
+        if file_date is None:
+            filtered.append(f)
+            continue
+        if start is not None and file_date < start:
+            continue
+        if end is not None and file_date > end:
+            continue
+        filtered.append(f)
+    return filtered
+
+
 def load_snapshots_directory(
     directory: Path | str,
     symbol: str | None = None,
     n_levels: int = 10,
     sample_interval_us: int = DEFAULT_SAMPLE_INTERVAL_US,
+    start: str | None = None,
+    end: str | None = None,
     **kwargs,
 ) -> pd.DataFrame:
     """Load all Tardis CSV files from a directory into a single snapshots DataFrame.
@@ -307,6 +345,8 @@ def load_snapshots_directory(
         symbol: If set, only load files matching this symbol.
         n_levels: Number of book levels per side.
         sample_interval_us: Subsampling interval in microseconds.
+        start: ISO date string (e.g. '2024-01-01') — skip files before this date.
+        end: ISO date string — skip files after this date.
         **kwargs: Passed to load_snapshots().
 
     Returns:
@@ -320,7 +360,7 @@ def load_snapshots_directory(
     if symbol:
         files = [f for f in files if symbol.upper() in f.name.upper()]
 
-    files = sorted(set(files))
+    files = _filter_files_by_date(sorted(set(files)), start, end)
 
     if not files:
         logger.warning("No data files found in %s", directory)
