@@ -8,7 +8,7 @@
 
 An interactive market microstructure analytics platform that uses Hidden Markov Models to detect latent regimes in cryptocurrency order book data. The core challenge — inferring hidden states from noisy, high-dimensional signals — is the same problem I solved in my undergraduate research building [DevStats](https://github.com/CameronScarpati/DevStats), a CRA Award-winning academic integrity system that detects anomalous coding behavior via hidden-state inference. This project applies that same skill to quantitative finance: parsing Level 2 order book data, computing microstructure features (OFI, VPIN, Kyle's lambda), fitting a Gaussian HMM to detect market regimes, and rendering everything in a synchronized multi-panel dashboard.
 
-**Author:** Cameron Scarpati (incoming CMU MSCF, former Morgan Stanley Speedway team)
+**Author:** Cameron Scarpati
 
 ## Key Findings
 
