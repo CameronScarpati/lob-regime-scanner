@@ -223,22 +223,53 @@ body {
     padding: 0;
 }
 
+/* ── Range slider: hide the raw-index input boxes ── */
+.dash-slider input[type="number"],
+.dash-slider .rc-slider-input,
+.rc-slider-input {
+    display: none !important;
+}
+
 .rc-slider-track {
     background-color: #5C9CF5 !important;
+    height: 4px !important;
 }
 
 .rc-slider-handle {
     border-color: #5C9CF5 !important;
     background-color: #0d1420 !important;
+    width: 14px !important;
+    height: 14px !important;
+    margin-top: -5px !important;
+    border-width: 2px !important;
+    opacity: 1 !important;
+}
+
+.rc-slider-handle:hover,
+.rc-slider-handle:active,
+.rc-slider-handle-dragging {
+    border-color: #7db8ff !important;
+    box-shadow: 0 0 4px rgba(92, 156, 245, 0.4) !important;
 }
 
 .rc-slider-rail {
     background-color: #1c2736 !important;
+    height: 4px !important;
 }
 
-/* ── Range slider dark style ── */
+/* ── Range slider: clean tick marks ── */
 .dash-slider .rc-slider-dot {
     display: none;
+}
+
+.dash-slider .rc-slider-mark-text {
+    color: #5a6575 !important;
+    font-size: 10px !important;
+}
+
+/* ── Hide any tooltip popups showing raw indices ── */
+.rc-slider-tooltip {
+    display: none !important;
 }
 
 /* ── Scrollbar ── */

@@ -249,6 +249,8 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                 step=1,
                                 value=[0, len(snap) - 1],
                                 marks=_build_slider_marks(snap["timestamp"]),
+                                allowCross=False,
+                                allow_direct_input=False,
                             ),
                         ],
                     ),
