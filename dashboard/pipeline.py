@@ -115,7 +115,11 @@ def run_pipeline(
         start_us = int(pd.Timestamp(start).timestamp() * 1e6)
         events = events[events["timestamp_us"] >= start_us]
     if end is not None:
-        end_us = int(pd.Timestamp(end).timestamp() * 1e6)
+        # Make end-date inclusive of the full day
+        end_ts = pd.Timestamp(end)
+        if end_ts == end_ts.normalize():  # date-only, no time component
+            end_ts = end_ts + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+        end_us = int(end_ts.timestamp() * 1e6)
         events = events[events["timestamp_us"] <= end_us]
 
     if events.empty:
@@ -185,6 +189,20 @@ def run_pipeline(
     )
 
     # ── Step 6: Prepare dashboard-compatible output ──────────────────────
+    # Subsample for dashboard performance (target ~3600 points max)
+    max_display = 3600
+    if len(snap_df) > max_display:
+        step = len(snap_df) // max_display
+        display_idx = np.arange(0, len(snap_df), step)
+        snap_df = snap_df.iloc[display_idx].reset_index(drop=True)
+        feature_matrix = feature_matrix.iloc[display_idx].reset_index(drop=True)
+        states = states[display_idx]
+        state_probs = state_probs[display_idx]
+        bt_pnl = bt.cumulative_pnl[display_idx]
+        logger.info("Subsampled to %d points for dashboard display", len(snap_df))
+    else:
+        bt_pnl = bt.cumulative_pnl
+
     # Convert microsecond timestamps to datetime for dashboard display
     snap_out = snap_df.copy()
     snap_out["timestamp"] = pd.to_datetime(snap_out["timestamp"], unit="us")
@@ -224,5 +242,5 @@ def run_pipeline(
             "state_probs": state_probs,
             "transition_matrix": trans_mat,
         },
-        "cumulative_pnl": bt.cumulative_pnl,
+        "cumulative_pnl": bt_pnl,
     }
