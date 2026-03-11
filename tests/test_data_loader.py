@@ -1,201 +1,156 @@
-"""Tests for Bybit L2 data loader."""
+"""Tests for Tardis book_snapshot data loader."""
 
 import gzip
-import json
-import tempfile
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from src.data_loader import load_csv, load_jsonl, load, load_directory
+from src.data_loader import load, load_directory
 
 
-def _make_jsonl_gz(records: list[dict], path: Path) -> Path:
-    """Helper: write JSON records to a gzipped JSONL file."""
+def _make_tardis_csv_gz(
+    path: Path,
+    n_levels: int = 3,
+    n_rows: int = 2,
+    base_ts_us: int = 1700000000000000,
+    base_price: float = 50000.0,
+) -> Path:
+    """Helper: write a Tardis book_snapshot CSV file."""
+    cols = ["timestamp", "local_timestamp"]
+    for i in range(n_levels):
+        cols.append(f"asks[{i}].price")
+        cols.append(f"asks[{i}].amount")
+    for i in range(n_levels):
+        cols.append(f"bids[{i}].price")
+        cols.append(f"bids[{i}].amount")
+
+    rows = []
+    for r in range(n_rows):
+        ts = base_ts_us + r * 1_000_000  # 1s apart
+        local_ts = ts + 500
+        parts = [str(ts), str(local_ts)]
+        for i in range(n_levels):
+            parts.append(f"{base_price + 0.5 + i * 0.5:.2f}")  # ask prices
+            parts.append(f"{1.0 + i * 0.5:.3f}")  # ask amounts
+        for i in range(n_levels):
+            parts.append(f"{base_price - 0.5 - i * 0.5:.2f}")  # bid prices
+            parts.append(f"{1.5 - i * 0.3:.3f}")  # bid amounts
+        rows.append(",".join(parts))
+
     with gzip.open(path, "wt", encoding="utf-8") as f:
-        for rec in records:
-            f.write(json.dumps(rec) + "\n")
+        f.write(",".join(cols) + "\n")
+        for row in rows:
+            f.write(row + "\n")
+
     return path
 
 
-def _sample_snapshot(ts_ms: int = 1700000000000) -> dict:
-    """Create a sample Bybit orderbook snapshot record."""
-    return {
-        "topic": "orderbook.200.BTCUSDT",
-        "type": "snapshot",
-        "ts": ts_ms,
-        "data": {
-            "s": "BTCUSDT",
-            "b": [["50000.00", "1.5"], ["49999.50", "2.0"], ["49999.00", "3.0"]],
-            "a": [["50000.50", "1.0"], ["50001.00", "2.5"], ["50001.50", "0.5"]],
-            "u": 100,
-            "seq": 1000,
-        },
-        "cts": ts_ms - 5,
-    }
-
-
-def _sample_delta(ts_ms: int = 1700000001000) -> dict:
-    """Create a sample Bybit orderbook delta record."""
-    return {
-        "topic": "orderbook.200.BTCUSDT",
-        "type": "delta",
-        "ts": ts_ms,
-        "data": {
-            "s": "BTCUSDT",
-            "b": [["50000.00", "2.0"]],
-            "a": [["50000.50", "0"]],
-            "u": 101,
-            "seq": 1001,
-        },
-        "cts": ts_ms - 5,
-    }
-
-
-class TestLoadJsonl:
+class TestLoad:
     def test_loads_snapshot(self, tmp_path):
-        path = tmp_path / "test.jsonl.gz"
-        _make_jsonl_gz([_sample_snapshot()], path)
+        path = tmp_path / "book_snapshot_25_test.csv.gz"
+        _make_tardis_csv_gz(path, n_levels=3, n_rows=2)
 
-        df = load_jsonl(path)
+        df = load(path)
 
-        assert len(df) == 6  # 3 bids + 3 asks
+        # 2 rows x (3 ask + 3 bid) = 12 events
+        assert len(df) == 12
         assert set(df["side"].unique()) == {"bid", "ask"}
-        assert df["type"].iloc[0] == "snapshot"
+        assert (df["type"] == "snapshot").all()
         assert df["price"].dtype == np.float64
         assert df["qty"].dtype == np.float64
 
-    def test_loads_snapshot_and_delta(self, tmp_path):
-        path = tmp_path / "test.jsonl.gz"
-        _make_jsonl_gz([_sample_snapshot(), _sample_delta()], path)
+    def test_max_rows_limits_parsing(self, tmp_path):
+        path = tmp_path / "book_snapshot_25_test.csv.gz"
+        _make_tardis_csv_gz(path, n_levels=3, n_rows=5)
 
-        df = load_jsonl(path)
+        df = load(path, max_rows=2)
 
-        # 6 from snapshot + 2 from delta
-        assert len(df) == 8
-        assert (df["type"] == "snapshot").sum() == 6
-        assert (df["type"] == "delta").sum() == 2
-
-    def test_max_records_limits_parsing(self, tmp_path):
-        path = tmp_path / "test.jsonl.gz"
-        records = [_sample_snapshot(), _sample_delta(), _sample_delta()]
-        _make_jsonl_gz(records, path)
-
-        df = load_jsonl(path, max_records=1)
-
-        # Only the first record (snapshot with 6 levels)
-        assert len(df) == 6
+        # Only 2 snapshot rows x 6 levels = 12
+        assert len(df) == 12
 
     def test_empty_file_returns_empty_df(self, tmp_path):
-        path = tmp_path / "empty.jsonl.gz"
-        _make_jsonl_gz([], path)
+        path = tmp_path / "book_snapshot_25_empty.csv.gz"
+        _make_tardis_csv_gz(path, n_levels=3, n_rows=0)
 
-        df = load_jsonl(path)
+        df = load(path)
         assert len(df) == 0
         assert "timestamp_us" in df.columns
 
-    def test_timestamp_converted_to_microseconds(self, tmp_path):
-        path = tmp_path / "test.jsonl.gz"
-        ts_ms = 1700000000000
-        _make_jsonl_gz([_sample_snapshot(ts_ms)], path)
+    def test_timestamp_preserved_as_microseconds(self, tmp_path):
+        path = tmp_path / "book_snapshot_25_test.csv.gz"
+        ts_us = 1700000000000000
+        _make_tardis_csv_gz(path, n_levels=1, n_rows=1, base_ts_us=ts_us)
 
-        df = load_jsonl(path)
+        df = load(path)
+        assert (df["timestamp_us"] == ts_us).all()
+
+    def test_millisecond_timestamps_converted(self, tmp_path):
+        path = tmp_path / "book_snapshot_25_test.csv.gz"
+        # Use a timestamp that looks like milliseconds (< 1e15)
+        ts_ms = 1700000000000  # 13 digits = milliseconds
+        _make_tardis_csv_gz(path, n_levels=1, n_rows=1, base_ts_us=ts_ms)
+
+        df = load(path)
         expected_us = ts_ms * 1000
         assert (df["timestamp_us"] == expected_us).all()
 
     def test_prices_parsed_correctly(self, tmp_path):
-        path = tmp_path / "test.jsonl.gz"
-        _make_jsonl_gz([_sample_snapshot()], path)
-
-        df = load_jsonl(path)
-        bid_prices = df[df["side"] == "bid"]["price"].sort_values(ascending=False).tolist()
-        assert bid_prices == [50000.00, 49999.50, 49999.00]
-
-
-class TestLoadCsv:
-    def test_loads_basic_csv(self, tmp_path):
-        path = tmp_path / "test.csv.gz"
-        data = pd.DataFrame({
-            "timestamp": [1700000000.0, 1700000000.0, 1700000001.0],
-            "side": ["Buy", "Sell", "Buy"],
-            "price": [50000.0, 50001.0, 50000.5],
-            "qty": [1.0, 2.0, 0.5],
-        })
-        data.to_csv(path, index=False)
-
-        df = load_csv(path)
-
-        assert len(df) == 3
-        assert set(df.columns) == {
-            "timestamp_us", "type", "side", "price", "qty", "update_id", "seq"
-        }
-        assert set(df["side"].unique()) == {"bid", "ask"}
-
-    def test_timestamp_seconds_to_microseconds(self, tmp_path):
-        path = tmp_path / "test.csv"
-        data = pd.DataFrame({
-            "timestamp": [1700000000.5],
-            "side": ["Buy"],
-            "price": [50000.0],
-            "qty": [1.0],
-        })
-        data.to_csv(path, index=False)
-
-        df = load_csv(path)
-        assert df["timestamp_us"].iloc[0] == 1700000000500000
-
-    def test_side_normalization(self, tmp_path):
-        path = tmp_path / "test.csv"
-        data = pd.DataFrame({
-            "timestamp": [1.0, 2.0, 3.0, 4.0],
-            "side": ["Buy", "Sell", "buy", "sell"],
-            "price": [100.0, 101.0, 100.0, 101.0],
-            "qty": [1.0, 1.0, 1.0, 1.0],
-        })
-        data.to_csv(path, index=False)
-
-        df = load_csv(path)
-        assert set(df["side"].unique()) == {"bid", "ask"}
-
-
-class TestLoadAutoDetect:
-    def test_detects_jsonl(self, tmp_path):
-        path = tmp_path / "data.jsonl.gz"
-        _make_jsonl_gz([_sample_snapshot()], path)
+        path = tmp_path / "book_snapshot_25_test.csv.gz"
+        _make_tardis_csv_gz(path, n_levels=3, n_rows=1, base_price=50000.0)
 
         df = load(path)
-        assert len(df) == 6
+        ask_prices = sorted(df[df["side"] == "ask"]["price"].tolist())
+        assert ask_prices == [50000.50, 50001.00, 50001.50]
 
-    def test_detects_csv(self, tmp_path):
-        path = tmp_path / "data.csv"
-        data = pd.DataFrame({
-            "timestamp": [1.0],
-            "side": ["Buy"],
-            "price": [50000.0],
-            "qty": [1.0],
-        })
-        data.to_csv(path, index=False)
+        bid_prices = sorted(df[df["side"] == "bid"]["price"].tolist(), reverse=True)
+        assert bid_prices == [49999.50, 49999.00, 49998.50]
+
+    def test_zero_qty_levels_excluded(self, tmp_path):
+        """Levels with zero quantity should be filtered out."""
+        path = tmp_path / "book_snapshot_25_test.csv.gz"
+        # Write a custom file with a zero-qty level
+        cols = ["timestamp", "local_timestamp",
+                "asks[0].price", "asks[0].amount",
+                "bids[0].price", "bids[0].amount"]
+        with gzip.open(path, "wt") as f:
+            f.write(",".join(cols) + "\n")
+            f.write("1700000000000000,1700000000000500,50001.00,1.5,50000.00,0.0\n")
 
         df = load(path)
+        # bid has qty=0, should be excluded
         assert len(df) == 1
+        assert df.iloc[0]["side"] == "ask"
 
 
 class TestLoadDirectory:
     def test_loads_multiple_files(self, tmp_path):
-        _make_jsonl_gz([_sample_snapshot()], tmp_path / "BTCUSDT_2024-01-01.jsonl.gz")
-        _make_jsonl_gz([_sample_delta()], tmp_path / "BTCUSDT_2024-01-02.jsonl.gz")
+        _make_tardis_csv_gz(
+            tmp_path / "bybit_book_snapshot_25_2024-01-01_BTCUSDT.csv.gz",
+            n_levels=3, n_rows=2,
+        )
+        _make_tardis_csv_gz(
+            tmp_path / "bybit_book_snapshot_25_2024-01-02_BTCUSDT.csv.gz",
+            n_levels=3, n_rows=1,
+            base_ts_us=1700100000000000,
+        )
 
         df = load_directory(tmp_path)
-        assert len(df) == 8  # 6 + 2
+        assert len(df) == 18  # (2+1) rows x 6 levels
 
     def test_filters_by_symbol(self, tmp_path):
-        _make_jsonl_gz([_sample_snapshot()], tmp_path / "BTCUSDT_2024-01-01.jsonl.gz")
-        _make_jsonl_gz([_sample_delta()], tmp_path / "ETHUSDT_2024-01-01.jsonl.gz")
+        _make_tardis_csv_gz(
+            tmp_path / "bybit_book_snapshot_25_2024-01-01_BTCUSDT.csv.gz",
+            n_levels=3, n_rows=2,
+        )
+        _make_tardis_csv_gz(
+            tmp_path / "bybit_book_snapshot_25_2024-01-01_ETHUSDT.csv.gz",
+            n_levels=3, n_rows=1,
+        )
 
         df = load_directory(tmp_path, symbol="BTCUSDT")
-        assert len(df) == 6  # Only BTC
+        assert len(df) == 12  # Only BTC: 2 rows x 6 levels
 
     def test_empty_directory(self, tmp_path):
         df = load_directory(tmp_path)

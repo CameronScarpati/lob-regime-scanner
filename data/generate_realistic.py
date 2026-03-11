@@ -1,17 +1,17 @@
-"""Generate realistic synthetic Bybit L2 data for pipeline validation.
+"""Generate realistic synthetic Tardis-format L2 data for pipeline validation.
 
-Produces JSONL.gz files in the exact format that Bybit's quote-saver API
-returns, simulating a 3-day BTCUSDT window with a liquidation cascade
-on day 2 for compelling visuals and pipeline stress testing.
+Produces CSV.gz files in the Tardis book_snapshot_25 format, simulating a
+3-day BTCUSDT window with a liquidation cascade on day 2 for compelling
+visuals and pipeline stress testing.
 
-Each JSON record has the Bybit schema:
-  {"type": "snapshot"|"delta", "ts": <ms>, "data": {"b": [...], "a": [...], "u": <id>, "seq": <n>}}
+Each CSV row is a full book snapshot with columns:
+  timestamp, local_timestamp,
+  asks[0].price, asks[0].amount, ..., asks[24].price, asks[24].amount,
+  bids[0].price, bids[0].amount, ..., bids[24].price, bids[24].amount
 """
 
 import gzip
-import json
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -22,17 +22,19 @@ logger = logging.getLogger(__name__)
 RAW_DIR = Path(__file__).parent / "raw"
 
 # Simulation parameters
-N_LEVELS = 200  # Bybit ob200 provides 200 levels
+N_LEVELS = 25  # Tardis book_snapshot_25 provides 25 levels per side
 TICK_SIZE = 0.10  # BTCUSDT tick size
 BASE_PRICE = 97_500.0  # BTC price around Feb 2025
-SNAPSHOT_INTERVAL_S = 60  # Full snapshot every 60 seconds
-DELTA_INTERVAL_MS = 100  # Delta updates every 100ms
+SNAPSHOT_INTERVAL_S = 5  # Emit a snapshot every 5 seconds
 
 
 def _generate_book_levels(
     mid: float, n_levels: int, rng: np.random.Generator
-) -> tuple[list[list[str]], list[list[str]]]:
-    """Generate bid/ask levels around a mid price."""
+) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    """Generate bid/ask levels around a mid price.
+
+    Returns (bids, asks) as lists of (price, amount) tuples.
+    """
     bids = []
     asks = []
     half_spread = TICK_SIZE * rng.uniform(0.5, 2.0)
@@ -46,10 +48,39 @@ def _generate_book_levels(
         bid_vol = round(base_vol * rng.uniform(0.5, 2.0), 3)
         ask_vol = round(base_vol * rng.uniform(0.5, 2.0), 3)
 
-        bids.append([f"{bid_price:.2f}", f"{bid_vol:.3f}"])
-        asks.append([f"{ask_price:.2f}", f"{ask_vol:.3f}"])
+        bids.append((round(bid_price, 2), bid_vol))
+        asks.append((round(ask_price, 2), ask_vol))
 
     return bids, asks
+
+
+def _build_csv_header(n_levels: int) -> str:
+    """Build the Tardis book_snapshot CSV header."""
+    cols = ["timestamp", "local_timestamp"]
+    for i in range(n_levels):
+        cols.append(f"asks[{i}].price")
+        cols.append(f"asks[{i}].amount")
+    for i in range(n_levels):
+        cols.append(f"bids[{i}].price")
+        cols.append(f"bids[{i}].amount")
+    return ",".join(cols)
+
+
+def _format_snapshot_row(
+    ts_us: int,
+    local_ts_us: int,
+    asks: list[tuple[float, float]],
+    bids: list[tuple[float, float]],
+) -> str:
+    """Format a single snapshot as a CSV row."""
+    parts = [str(ts_us), str(local_ts_us)]
+    for price, amount in asks:
+        parts.append(f"{price:.2f}")
+        parts.append(f"{amount:.3f}")
+    for price, amount in bids:
+        parts.append(f"{price:.2f}")
+        parts.append(f"{amount:.3f}")
+    return ",".join(parts)
 
 
 def _simulate_day(
@@ -60,24 +91,23 @@ def _simulate_day(
     drift: float = 0.0,
     cascade_start_hour: int | None = None,
     cascade_duration_min: int = 30,
-) -> tuple[list[dict], float]:
-    """Simulate one day of L2 order book updates.
+) -> tuple[list[str], float]:
+    """Simulate one day of L2 order book snapshots.
 
-    Returns (list_of_records, closing_price).
+    Returns (list_of_csv_rows, closing_price).
     """
-    records = []
+    rows = []
     mid = start_price
-    update_id = 1
-    seq = 1
 
-    # Generate updates for 24 hours
+    # Generate snapshots for 24 hours at SNAPSHOT_INTERVAL_S resolution
     total_seconds = 24 * 3600
-    # Use 1-second resolution for deltas (not 100ms — keeps file size manageable)
-    n_steps = total_seconds
+    n_steps = total_seconds // SNAPSHOT_INTERVAL_S
 
     for step in range(n_steps):
-        ts_ms = int((base_date + timedelta(seconds=step)).timestamp() * 1000)
-        current_hour = step / 3600
+        elapsed_s = step * SNAPSHOT_INTERVAL_S
+        ts = base_date + timedelta(seconds=elapsed_s)
+        ts_us = int(ts.timestamp() * 1_000_000)
+        local_ts_us = ts_us + rng.integers(100, 5000)  # small local delay
 
         # Adjust volatility during cascade
         vol = volatility
@@ -85,63 +115,30 @@ def _simulate_day(
         if cascade_start_hour is not None:
             cascade_start_s = cascade_start_hour * 3600
             cascade_end_s = cascade_start_s + cascade_duration_min * 60
-            if cascade_start_s <= step < cascade_end_s:
-                progress = (step - cascade_start_s) / (cascade_end_s - cascade_start_s)
-                # Sharp sell-off then partial recovery
+            if cascade_start_s <= elapsed_s < cascade_end_s:
+                progress = (elapsed_s - cascade_start_s) / (cascade_end_s - cascade_start_s)
                 if progress < 0.6:
                     vol = volatility * 5
-                    dr = -0.00003  # strong downward drift per second
+                    dr = -0.00003 * SNAPSHOT_INTERVAL_S
                 else:
                     vol = volatility * 3
-                    dr = 0.00001  # partial recovery
+                    dr = 0.00001 * SNAPSHOT_INTERVAL_S
 
-        # Random walk for mid-price
-        ret = rng.normal(dr, vol)
+        # Random walk for mid-price (scale vol by interval)
+        ret = rng.normal(dr, vol * np.sqrt(SNAPSHOT_INTERVAL_S))
         mid = mid * (1 + ret)
 
-        # Emit snapshot at every step (ensures consistent book state)
-        # Use fewer levels for delta-style records to keep file size down
-        if step % SNAPSHOT_INTERVAL_S == 0:
-            n_lvl = N_LEVELS
-        else:
-            n_lvl = 20  # top-of-book only for non-snapshot updates
-
-        bids, asks = _generate_book_levels(mid, n_lvl, rng)
-        # All records are snapshots to ensure consistent book state
-        rec_type = "snapshot"
-
-        record = {
-            "type": rec_type,
-            "ts": ts_ms,
-            "data": {
-                "b": bids,
-                "a": asks,
-                "u": update_id,
-                "seq": seq,
-            },
-        }
-
-        records.append(record)
-        update_id += 1
-        seq += 1
-
-        # Only emit every 5th second to keep file sizes reasonable
-        # (still gives us ~17k records per day)
-        if step % 5 != 0:
-            continue
-
-    # Filter to only the records we want (every 5th)
-    # Actually, let's just thin the records we already built
-    records_thinned = records[::5]
+        bids, asks = _generate_book_levels(mid, N_LEVELS, rng)
+        rows.append(_format_snapshot_row(ts_us, local_ts_us, asks, bids))
 
     logger.info(
-        "Simulated day %s: %d records, price %.2f -> %.2f",
+        "Simulated day %s: %d snapshots, price %.2f -> %.2f",
         base_date.strftime("%Y-%m-%d"),
-        len(records_thinned),
+        len(rows),
         start_price,
         mid,
     )
-    return records_thinned, mid
+    return rows, mid
 
 
 def generate_realistic_data(
@@ -151,7 +148,7 @@ def generate_realistic_data(
     output_dir: Path | None = None,
     seed: int = 42,
 ) -> list[Path]:
-    """Generate realistic L2 order book data files.
+    """Generate realistic L2 order book data files in Tardis CSV format.
 
     Day 1: Normal trading (quiet/trending regimes)
     Day 2: Liquidation cascade mid-day (toxic regime)
@@ -177,6 +174,8 @@ def generate_realistic_data(
     price = BASE_PRICE
     paths = []
 
+    header = _build_csv_header(N_LEVELS)
+
     day_configs = [
         {"volatility": 0.000015, "drift": 0.0, "cascade_start_hour": None},
         {"volatility": 0.00002, "drift": 0.0, "cascade_start_hour": 14,
@@ -187,24 +186,23 @@ def generate_realistic_data(
     for day_idx in range(min(n_days, len(day_configs))):
         day_date = base + timedelta(days=day_idx)
         date_str = day_date.strftime("%Y-%m-%d")
-        out_path = output_dir / f"{symbol}_{date_str}.jsonl.gz"
+        out_path = output_dir / f"bybit_book_snapshot_25_{date_str}_{symbol}.csv.gz"
 
         if out_path.exists():
             logger.info("Already exists: %s", out_path.name)
             paths.append(out_path)
-            price = price * (1 + rng.normal(0, 0.01))  # approximate
+            price = price * (1 + rng.normal(0, 0.01))
             continue
 
         config = day_configs[day_idx]
-        records, price = _simulate_day(
-            day_date, price, rng, **config
-        )
+        rows, price = _simulate_day(day_date, price, rng, **config)
 
         with gzip.open(out_path, "wt", encoding="utf-8") as f:
-            for rec in records:
-                f.write(json.dumps(rec) + "\n")
+            f.write(header + "\n")
+            for row in rows:
+                f.write(row + "\n")
 
-        logger.info("Wrote %s (%d records)", out_path.name, len(records))
+        logger.info("Wrote %s (%d snapshots)", out_path.name, len(rows))
         paths.append(out_path)
 
     return paths
