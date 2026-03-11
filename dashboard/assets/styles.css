@@ -89,13 +89,26 @@ body {
     flex: 1;
 }
 
+.slider-label-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 2px;
+}
+
 .controls-bar .slider-label {
     font-size: 10px;
     color: #7a8490;
-    margin-bottom: 2px;
     text-transform: uppercase;
     letter-spacing: 1px;
     font-weight: 600;
+}
+
+.slider-readout {
+    font-size: 12px;
+    color: #b0b8c4;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.3px;
 }
 
 /* ── Regime filter buttons ── */

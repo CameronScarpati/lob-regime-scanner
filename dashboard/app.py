@@ -232,7 +232,16 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                     html.Div(
                         className="slider-container",
                         children=[
-                            html.Div("Time Window", className="slider-label"),
+                            html.Div(
+                                className="slider-label-row",
+                                children=[
+                                    html.Div("Time Window", className="slider-label"),
+                                    html.Div(
+                                        id="time-window-readout",
+                                        className="slider-readout",
+                                    ),
+                                ],
+                            ),
                             dcc.RangeSlider(
                                 id="date-range-slider",
                                 min=0,
@@ -240,10 +249,7 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                 step=1,
                                 value=[0, len(snap) - 1],
                                 marks=_build_slider_marks(snap["timestamp"]),
-                                tooltip={
-                                    "placement": "bottom",
-                                    "always_visible": False,
-                                },
+                                tooltip={"always_visible": False},
                             ),
                         ],
                     ),
