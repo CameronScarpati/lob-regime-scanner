@@ -23,18 +23,12 @@ from dashboard._constants import (
 def _build_volume_matrix(
     snapshots: pd.DataFrame,
     n_levels: int = 10,
-    max_time_steps: int = 2000,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build a 2-D volume matrix (price_levels x time) from snapshot data.
 
     Returns (price_axis, time_axis, volume_matrix).
-    Subsamples to *max_time_steps* if the data is larger.
+    Caller is responsible for subsampling *snapshots* beforehand.
     """
-    # Subsample for performance
-    if len(snapshots) > max_time_steps:
-        step = len(snapshots) // max_time_steps
-        snapshots = snapshots.iloc[::step].reset_index(drop=True)
-
     n_t = len(snapshots)
 
     bid_prices = np.column_stack(
@@ -79,6 +73,13 @@ def create_heatmap_figure(
     snapshots : DataFrame with book_reconstructor schema.
     regimes : 1-D array of regime labels (0, 1, 2) aligned to snapshots.
     """
+    # Subsample all arrays together so mid-price, regimes, and trades align
+    max_time_steps = 2000
+    if len(snapshots) > max_time_steps:
+        step = len(snapshots) // max_time_steps
+        snapshots = snapshots.iloc[::step].reset_index(drop=True)
+        regimes = regimes[::step]
+
     price_axis, time_axis, vol_matrix = _build_volume_matrix(snapshots)
 
     fig = make_subplots(
