@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 
+import pandas as pd
 from dash import Dash, dcc, html
 
 from dashboard._constants import PANEL_DESCRIPTIONS
@@ -26,6 +27,40 @@ from dashboard.components.depth_surface import create_depth_surface_figure
 from dashboard.components.diagnostics import create_diagnostics_figure
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _build_slider_marks(
+    timestamps: pd.Series,
+    n_marks: int = 6,
+) -> dict[int, str]:
+    """Create evenly-spaced slider marks with human-readable time labels.
+
+    If all timestamps fall on the same date, marks show only the time
+    (e.g. "09:15"). When the range spans multiple days the date is
+    included (e.g. "Jan 15 09:15").
+    """
+    n = len(timestamps)
+    if n == 0:
+        return {}
+
+    indices = [int(i * (n - 1) / (n_marks - 1)) for i in range(n_marks)]
+
+    ts_start = pd.Timestamp(timestamps.iloc[0])
+    ts_end = pd.Timestamp(timestamps.iloc[-1])
+    same_day = ts_start.date() == ts_end.date()
+
+    marks: dict[int, str] = {}
+    for idx in indices:
+        ts = pd.Timestamp(timestamps.iloc[idx])
+        if same_day:
+            marks[idx] = ts.strftime("%-H:%M")
+        else:
+            marks[idx] = ts.strftime("%b %-d %H:%M")
+    return marks
 
 
 # ---------------------------------------------------------------------------
@@ -197,20 +232,14 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                     html.Div(
                         className="slider-container",
                         children=[
-                            html.Div("Date Range", className="slider-label"),
+                            html.Div("Time Window", className="slider-label"),
                             dcc.RangeSlider(
                                 id="date-range-slider",
                                 min=0,
                                 max=len(snap) - 1,
                                 step=1,
                                 value=[0, len(snap) - 1],
-                                marks={
-                                    0: "Start",
-                                    len(snap) // 4: "25%",
-                                    len(snap) // 2: "50%",
-                                    3 * len(snap) // 4: "75%",
-                                    len(snap) - 1: "End",
-                                },
+                                marks=_build_slider_marks(snap["timestamp"]),
                                 tooltip={
                                     "placement": "bottom",
                                     "always_visible": False,
