@@ -24,6 +24,7 @@ dependencies = [
 dev = [
     "pytest>=7.4",
     "pybind11>=2.11",
+    "ruff>=0.4",
 ]
 
 [tool.setuptools.packages.find]
@@ -31,3 +32,21 @@ include = ["src*", "data*", "dashboard*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E501",    # line length handled by formatter
+    "SIM108",  # ternary operator — readability preference
+    "RUF001",  # ambiguous unicode in strings (en-dash in messages)
+    "RUF002",  # ambiguous unicode in docstrings (math symbols: ×, −)
+    "RUF003",  # ambiguous unicode in comments (math symbols)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "dashboard", "data"]
+

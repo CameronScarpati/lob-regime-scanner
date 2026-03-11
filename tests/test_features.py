@@ -9,7 +9,6 @@ from src.features import (
     N_LEVELS,
     OFI_DEPTHS,
     RVOL_HORIZONS,
-    ZSCORE_WINDOW,
     _rolling_zscore,
     build_feature_matrix,
     compute_book_imbalance,
@@ -24,10 +23,10 @@ from src.features import (
     compute_weighted_mid,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_snapshot_df(n: int = 500, seed: int = 42) -> pd.DataFrame:
     """Create a realistic-looking snapshot DataFrame for testing.
@@ -80,6 +79,7 @@ def small_df() -> pd.DataFrame:
 # Rolling z-score
 # ---------------------------------------------------------------------------
 
+
 class TestRollingZscore:
     def test_output_shape(self, snapshot_df: pd.DataFrame) -> None:
         s = snapshot_df["mid_price"]
@@ -103,6 +103,7 @@ class TestRollingZscore:
 # ---------------------------------------------------------------------------
 # OFI
 # ---------------------------------------------------------------------------
+
 
 class TestOFI:
     def test_columns_present(self, snapshot_df: pd.DataFrame) -> None:
@@ -129,10 +130,12 @@ class TestOFI:
 
     def test_known_values(self) -> None:
         """Verify OFI computation with hand-crafted data."""
-        df = pd.DataFrame({
-            "bid_qty_1": [10.0, 12.0, 8.0],
-            "ask_qty_1": [10.0, 10.0, 14.0],
-        })
+        df = pd.DataFrame(
+            {
+                "bid_qty_1": [10.0, 12.0, 8.0],
+                "ask_qty_1": [10.0, 10.0, 14.0],
+            }
+        )
         ofi = compute_ofi(df, depths=[1])
         # row 1: Δbid=2, Δask=0 → OFI=2
         assert ofi["ofi_1"].iloc[1] == pytest.approx(2.0)
@@ -143,6 +146,7 @@ class TestOFI:
 # ---------------------------------------------------------------------------
 # VPIN
 # ---------------------------------------------------------------------------
+
 
 class TestVPIN:
     def test_output_length(self, snapshot_df: pd.DataFrame) -> None:
@@ -164,6 +168,7 @@ class TestVPIN:
 # Book imbalance
 # ---------------------------------------------------------------------------
 
+
 class TestBookImbalance:
     def test_range(self, snapshot_df: pd.DataFrame) -> None:
         bi = compute_book_imbalance(snapshot_df)
@@ -171,20 +176,18 @@ class TestBookImbalance:
         assert bi.max() <= 1.0 + 1e-9
 
     def test_balanced_book(self) -> None:
-        df = pd.DataFrame({
-            f"bid_qty_{i}": [10.0] for i in range(1, N_LEVELS + 1)
-        } | {
-            f"ask_qty_{i}": [10.0] for i in range(1, N_LEVELS + 1)
-        })
+        df = pd.DataFrame(
+            {f"bid_qty_{i}": [10.0] for i in range(1, N_LEVELS + 1)}
+            | {f"ask_qty_{i}": [10.0] for i in range(1, N_LEVELS + 1)}
+        )
         bi = compute_book_imbalance(df)
         assert bi.iloc[0] == pytest.approx(0.0)
 
     def test_all_bids(self) -> None:
-        df = pd.DataFrame({
-            f"bid_qty_{i}": [10.0] for i in range(1, N_LEVELS + 1)
-        } | {
-            f"ask_qty_{i}": [0.0] for i in range(1, N_LEVELS + 1)
-        })
+        df = pd.DataFrame(
+            {f"bid_qty_{i}": [10.0] for i in range(1, N_LEVELS + 1)}
+            | {f"ask_qty_{i}": [0.0] for i in range(1, N_LEVELS + 1)}
+        )
         bi = compute_book_imbalance(df)
         # Denom is 0 for ask side → should handle gracefully
         # With all-zero asks, denom = bid only, so (bid - 0) / bid = 1
@@ -196,26 +199,31 @@ class TestBookImbalance:
 # Weighted mid-price
 # ---------------------------------------------------------------------------
 
+
 class TestWeightedMid:
     def test_symmetric_book(self) -> None:
         """When bid_qty == ask_qty, weighted mid == arithmetic mid."""
-        df = pd.DataFrame({
-            "bid_price_1": [100.0],
-            "ask_price_1": [102.0],
-            "bid_qty_1": [5.0],
-            "ask_qty_1": [5.0],
-        })
+        df = pd.DataFrame(
+            {
+                "bid_price_1": [100.0],
+                "ask_price_1": [102.0],
+                "bid_qty_1": [5.0],
+                "ask_qty_1": [5.0],
+            }
+        )
         wm = compute_weighted_mid(df)
         assert wm.iloc[0] == pytest.approx(101.0)
 
     def test_asymmetric_book(self) -> None:
         """Weighted mid skews toward the side with more quantity."""
-        df = pd.DataFrame({
-            "bid_price_1": [100.0],
-            "ask_price_1": [102.0],
-            "bid_qty_1": [1.0],
-            "ask_qty_1": [9.0],
-        })
+        df = pd.DataFrame(
+            {
+                "bid_price_1": [100.0],
+                "ask_price_1": [102.0],
+                "bid_qty_1": [1.0],
+                "ask_qty_1": [9.0],
+            }
+        )
         wm = compute_weighted_mid(df)
         # (102*1 + 100*9) / (1 + 9) = (102 + 900) / 10 = 100.2
         assert wm.iloc[0] == pytest.approx(100.2)
@@ -225,17 +233,20 @@ class TestWeightedMid:
 # Spread (bps)
 # ---------------------------------------------------------------------------
 
+
 class TestSpreadBps:
     def test_positive(self, snapshot_df: pd.DataFrame) -> None:
         spread = compute_spread_bps(snapshot_df)
         assert (spread >= 0).all()
 
     def test_known_value(self) -> None:
-        df = pd.DataFrame({
-            "bid_price_1": [99.99],
-            "ask_price_1": [100.01],
-            "mid_price": [100.0],
-        })
+        df = pd.DataFrame(
+            {
+                "bid_price_1": [99.99],
+                "ask_price_1": [100.01],
+                "mid_price": [100.0],
+            }
+        )
         spread = compute_spread_bps(df)
         # (0.02 / 100) * 10000 = 2.0 bps
         assert spread.iloc[0] == pytest.approx(2.0)
@@ -244,6 +255,7 @@ class TestSpreadBps:
 # ---------------------------------------------------------------------------
 # Kyle's lambda
 # ---------------------------------------------------------------------------
+
 
 class TestKylesLambda:
     def test_output_length(self, snapshot_df: pd.DataFrame) -> None:
@@ -258,6 +270,7 @@ class TestKylesLambda:
 # ---------------------------------------------------------------------------
 # Trade flow aggression
 # ---------------------------------------------------------------------------
+
 
 class TestTradeFlowAggression:
     def test_with_trade_data(self, snapshot_df: pd.DataFrame) -> None:
@@ -277,6 +290,7 @@ class TestTradeFlowAggression:
 # Cancellation ratio
 # ---------------------------------------------------------------------------
 
+
 class TestCancellationRatio:
     def test_non_negative(self, snapshot_df: pd.DataFrame) -> None:
         cr = compute_cancellation_ratio(snapshot_df)
@@ -291,6 +305,7 @@ class TestCancellationRatio:
 # ---------------------------------------------------------------------------
 # Realized volatility
 # ---------------------------------------------------------------------------
+
 
 class TestRealizedVolatility:
     def test_columns(self, snapshot_df: pd.DataFrame) -> None:
@@ -316,6 +331,7 @@ class TestRealizedVolatility:
 # Return autocorrelation
 # ---------------------------------------------------------------------------
 
+
 class TestReturnAutocorrelation:
     def test_columns(self, snapshot_df: pd.DataFrame) -> None:
         ac = compute_return_autocorrelation(snapshot_df, window=50)
@@ -334,6 +350,7 @@ class TestReturnAutocorrelation:
 # ---------------------------------------------------------------------------
 # Feature matrix assembly
 # ---------------------------------------------------------------------------
+
 
 class TestBuildFeatureMatrix:
     def test_shape(self, snapshot_df: pd.DataFrame) -> None:

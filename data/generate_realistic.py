@@ -12,7 +12,7 @@ Each CSV row is a full book snapshot with columns:
 
 import gzip
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -170,7 +170,7 @@ def generate_realistic_data(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     rng = np.random.default_rng(seed)
-    base = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    base = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=UTC)
     price = BASE_PRICE
     paths = []
 
@@ -178,8 +178,7 @@ def generate_realistic_data(
 
     day_configs = [
         {"volatility": 0.000015, "drift": 0.0, "cascade_start_hour": None},
-        {"volatility": 0.00002, "drift": 0.0, "cascade_start_hour": 14,
-         "cascade_duration_min": 45},
+        {"volatility": 0.00002, "drift": 0.0, "cascade_start_hour": 14, "cascade_duration_min": 45},
         {"volatility": 0.000025, "drift": 0.0, "cascade_start_hour": None},
     ]
 

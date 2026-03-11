@@ -40,15 +40,11 @@ def _build_volume_matrix(
     bid_prices = np.column_stack(
         [snapshots[f"bid_price_{i}"].values for i in range(1, n_levels + 1)]
     )
-    bid_vols = np.column_stack(
-        [snapshots[f"bid_qty_{i}"].values for i in range(1, n_levels + 1)]
-    )
+    bid_vols = np.column_stack([snapshots[f"bid_qty_{i}"].values for i in range(1, n_levels + 1)])
     ask_prices = np.column_stack(
         [snapshots[f"ask_price_{i}"].values for i in range(1, n_levels + 1)]
     )
-    ask_vols = np.column_stack(
-        [snapshots[f"ask_qty_{i}"].values for i in range(1, n_levels + 1)]
-    )
+    ask_vols = np.column_stack([snapshots[f"ask_qty_{i}"].values for i in range(1, n_levels + 1)])
 
     all_prices = np.concatenate([bid_prices.ravel(), ask_prices.ravel()])
     p_min, p_max = np.nanpercentile(all_prices, [1, 99])
@@ -147,12 +143,7 @@ def create_heatmap_figure(
                 outlinewidth=0,
             ),
             showlegend=False,
-            hovertemplate=(
-                "Time: %{x}<br>"
-                "Price: $%{y:,.2f}<br>"
-                "Volume: %{z:.2f}"
-                "<extra></extra>"
-            ),
+            hovertemplate=("Time: %{x}<br>Price: $%{y:,.2f}<br>Volume: %{z:.2f}<extra></extra>"),
         ),
         row=2,
         col=1,
@@ -200,33 +191,35 @@ def create_heatmap_figure(
                 ),
                 name="Large Trades",
                 showlegend=True,
-                hovertemplate=(
-                    "Trade: $%{y:,.2f}<br>"
-                    "Size: %{marker.size:.1f}"
-                    "<extra></extra>"
-                ),
+                hovertemplate=("Trade: $%{y:,.2f}<br>Size: %{marker.size:.1f}<extra></extra>"),
             ),
             row=2,
             col=1,
         )
 
     fig.update_yaxes(
-        row=1, col=1,
+        row=1,
+        col=1,
         showticklabels=False,
         showgrid=False,
         zeroline=False,
     )
     fig.update_yaxes(
-        title_text="Price (USD)", row=2, col=1,
+        title_text="Price (USD)",
+        row=2,
+        col=1,
         **AXIS_STYLE,
     )
     fig.update_xaxes(
-        row=1, col=1,
+        row=1,
+        col=1,
         showticklabels=False,
         showgrid=False,
     )
     fig.update_xaxes(
-        title_text="", row=2, col=1,
+        title_text="",
+        row=2,
+        col=1,
         **XAXIS_STYLE,
     )
 

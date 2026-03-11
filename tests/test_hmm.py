@@ -3,19 +3,19 @@
 import numpy as np
 import pytest
 
+from src.backtest import BacktestResult, run_backtest
 from src.hmm_model import (
+    ModelSelection,
     RegimeDetector,
     RegimeStats,
-    ModelSelection,
-    select_model,
     _compute_durations,
+    select_model,
 )
-from src.backtest import run_backtest, BacktestResult
-
 
 # ---------------------------------------------------------------------------
 # Helpers: synthetic data with known regime structure
 # ---------------------------------------------------------------------------
+
 
 def _make_regime_data(
     n_per_regime: int = 200,
@@ -29,20 +29,20 @@ def _make_regime_data(
     Regime 2 (Toxic):    high variance, large mean
     """
     rng = np.random.RandomState(seed)
-    states_true = np.concatenate([
-        np.zeros(n_per_regime, dtype=int),
-        np.ones(n_per_regime, dtype=int),
-        np.full(n_per_regime, 2, dtype=int),
-    ])
+    states_true = np.concatenate(
+        [
+            np.zeros(n_per_regime, dtype=int),
+            np.ones(n_per_regime, dtype=int),
+            np.full(n_per_regime, 2, dtype=int),
+        ]
+    )
     X = np.empty((3 * n_per_regime, n_features))
     # Quiet
     X[:n_per_regime] = rng.normal(0.0, 0.3, (n_per_regime, n_features))
     # Trending
-    X[n_per_regime:2 * n_per_regime] = rng.normal(
-        2.0, 1.0, (n_per_regime, n_features)
-    )
+    X[n_per_regime : 2 * n_per_regime] = rng.normal(2.0, 1.0, (n_per_regime, n_features))
     # Toxic
-    X[2 * n_per_regime:] = rng.normal(5.0, 3.0, (n_per_regime, n_features))
+    X[2 * n_per_regime :] = rng.normal(5.0, 3.0, (n_per_regime, n_features))
     return X, states_true
 
 
@@ -57,9 +57,7 @@ def _make_alternating_regime_data(
     segments_X = []
     segments_s = []
     for _ in range(n_cycles):
-        for state, (mu, sigma) in enumerate(
-            [(0.0, 0.3), (2.0, 1.0), (5.0, 3.0)]
-        ):
+        for state, (mu, sigma) in enumerate([(0.0, 0.3), (2.0, 1.0), (5.0, 3.0)]):
             seg = rng.normal(mu, sigma, (cycle_len, n_features))
             segments_X.append(seg)
             segments_s.append(np.full(cycle_len, state, dtype=int))
@@ -69,6 +67,7 @@ def _make_alternating_regime_data(
 # ---------------------------------------------------------------------------
 # Tests: RegimeDetector
 # ---------------------------------------------------------------------------
+
 
 class TestRegimeDetector:
     """Tests for the RegimeDetector class."""
@@ -111,9 +110,7 @@ class TestRegimeDetector:
         # Check that model means are sorted by magnitude (proxy for volatility ordering)
         covars = det.model.covars_
         traces = [np.trace(c) for c in covars]
-        assert traces == sorted(traces), (
-            "States should be sorted by increasing covariance trace"
-        )
+        assert traces == sorted(traces), "States should be sorted by increasing covariance trace"
 
     def test_transition_matrix_shape_and_stochastic(self):
         """Transition matrix is square and row-stochastic."""
@@ -167,10 +164,12 @@ class TestRegimeDetector:
     def test_1d_input(self):
         """Model handles 1D input by reshaping."""
         rng = np.random.RandomState(42)
-        X = np.concatenate([
-            rng.normal(0, 0.3, 100),
-            rng.normal(3, 1.0, 100),
-        ])
+        X = np.concatenate(
+            [
+                rng.normal(0, 0.3, 100),
+                rng.normal(3, 1.0, 100),
+            ]
+        )
         det = RegimeDetector(n_states=2, n_iter=100, random_state=42)
         det.fit(X)
         states = det.predict(X)
@@ -179,10 +178,12 @@ class TestRegimeDetector:
     def test_two_states(self):
         """Model works with 2 states."""
         rng = np.random.RandomState(42)
-        X = np.vstack([
-            rng.normal(0, 0.5, (150, 2)),
-            rng.normal(4, 2.0, (150, 2)),
-        ])
+        X = np.vstack(
+            [
+                rng.normal(0, 0.5, (150, 2)),
+                rng.normal(4, 2.0, (150, 2)),
+            ]
+        )
         det = RegimeDetector(n_states=2, n_iter=100, random_state=42)
         det.fit(X)
         states = det.predict(X)
@@ -191,9 +192,7 @@ class TestRegimeDetector:
     def test_diag_covariance(self):
         """Model works with diagonal covariance."""
         X, _ = _make_regime_data()
-        det = RegimeDetector(
-            n_states=3, covariance_type="diag", n_iter=100, random_state=42
-        )
+        det = RegimeDetector(n_states=3, covariance_type="diag", n_iter=100, random_state=42)
         det.fit(X)
         states = det.predict(X)
         assert states.shape == (len(X),)
@@ -202,6 +201,7 @@ class TestRegimeDetector:
 # ---------------------------------------------------------------------------
 # Tests: Regime-conditional analysis
 # ---------------------------------------------------------------------------
+
 
 class TestRegimeStats:
     """Tests for regime-conditional statistics."""
@@ -253,6 +253,7 @@ class TestRegimeStats:
 # Tests: Model selection
 # ---------------------------------------------------------------------------
 
+
 class TestModelSelection:
     """Tests for BIC/AIC model selection."""
 
@@ -272,14 +273,13 @@ class TestModelSelection:
         X, _ = _make_regime_data(n_per_regime=300)
         result = select_model(X, state_range=range(2, 6), n_iter=100)
         # With well-separated 3-state data, BIC should at least reject 2
-        assert result.best_n_bic >= 3, (
-            f"Expected BIC to prefer >=3 states, got {result.best_n_bic}"
-        )
+        assert result.best_n_bic >= 3, f"Expected BIC to prefer >=3 states, got {result.best_n_bic}"
 
 
 # ---------------------------------------------------------------------------
 # Tests: Threshold comparison
 # ---------------------------------------------------------------------------
+
 
 class TestThresholdComparison:
     """Tests for compare_threshold_regimes."""
@@ -299,6 +299,7 @@ class TestThresholdComparison:
 # ---------------------------------------------------------------------------
 # Tests: Duration helper
 # ---------------------------------------------------------------------------
+
 
 class TestComputeDurations:
     """Tests for _compute_durations helper."""
@@ -322,6 +323,7 @@ class TestComputeDurations:
 # Tests: Backtest
 # ---------------------------------------------------------------------------
 
+
 class TestBacktest:
     """Tests for the regime-conditional backtest."""
 
@@ -330,10 +332,10 @@ class TestBacktest:
         # Construct a sequence: Quiet -> Trending -> Toxic -> Quiet -> ...
         n = 300
         states = np.zeros(n, dtype=int)
-        states[50:150] = 1   # Trending
+        states[50:150] = 1  # Trending
         states[150:200] = 2  # Toxic
         states[200:250] = 0  # Quiet
-        states[250:] = 1     # Trending again
+        states[250:] = 1  # Trending again
 
         rng = np.random.RandomState(42)
         returns = rng.normal(0.001, 0.01, n)
@@ -374,9 +376,7 @@ class TestBacktest:
 
     def test_backtest_empty_input(self):
         """Empty or very short input doesn't crash."""
-        result = run_backtest(
-            np.array([0]), np.array([0.01]), np.array([1.0])
-        )
+        result = run_backtest(np.array([0]), np.array([0.01]), np.array([1.0]))
         assert result.n_trades == 0
 
     def test_backtest_exit_on_quiet(self):
@@ -392,7 +392,7 @@ class TestBacktest:
     def test_backtest_result_fields(self):
         """All BacktestResult fields are populated."""
         states = np.array([0, 1, 1, 2, 0, 0, 1, 1, 2])
-        returns = np.array([0, .01, .02, -.01, 0, 0, .01, .01, -.01])
+        returns = np.array([0, 0.01, 0.02, -0.01, 0, 0, 0.01, 0.01, -0.01])
         ofi = np.ones(9)
 
         result = run_backtest(states, returns, ofi)
@@ -407,6 +407,7 @@ class TestBacktest:
 # ---------------------------------------------------------------------------
 # Integration: HMM + Backtest
 # ---------------------------------------------------------------------------
+
 
 class TestIntegration:
     """Integration tests combining HMM and backtest."""

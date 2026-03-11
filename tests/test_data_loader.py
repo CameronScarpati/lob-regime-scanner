@@ -4,7 +4,6 @@ import gzip
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from src.data_loader import load, load_directory, load_snapshots, load_snapshots_directory
@@ -111,9 +110,14 @@ class TestLoad:
         """Levels with zero quantity should be filtered out."""
         path = tmp_path / "book_snapshot_25_test.csv.gz"
         # Write a custom file with a zero-qty level
-        cols = ["timestamp", "local_timestamp",
-                "asks[0].price", "asks[0].amount",
-                "bids[0].price", "bids[0].amount"]
+        cols = [
+            "timestamp",
+            "local_timestamp",
+            "asks[0].price",
+            "asks[0].amount",
+            "bids[0].price",
+            "bids[0].amount",
+        ]
         with gzip.open(path, "wt") as f:
             f.write(",".join(cols) + "\n")
             f.write("1700000000000000,1700000000000500,50001.00,1.5,50000.00,0.0\n")
@@ -128,11 +132,13 @@ class TestLoadDirectory:
     def test_loads_multiple_files(self, tmp_path):
         _make_tardis_csv_gz(
             tmp_path / "bybit_book_snapshot_25_2024-01-01_BTCUSDT.csv.gz",
-            n_levels=3, n_rows=2,
+            n_levels=3,
+            n_rows=2,
         )
         _make_tardis_csv_gz(
             tmp_path / "bybit_book_snapshot_25_2024-01-02_BTCUSDT.csv.gz",
-            n_levels=3, n_rows=1,
+            n_levels=3,
+            n_rows=1,
             base_ts_us=1700100000000000,
         )
 
@@ -142,11 +148,13 @@ class TestLoadDirectory:
     def test_filters_by_symbol(self, tmp_path):
         _make_tardis_csv_gz(
             tmp_path / "bybit_book_snapshot_25_2024-01-01_BTCUSDT.csv.gz",
-            n_levels=3, n_rows=2,
+            n_levels=3,
+            n_rows=2,
         )
         _make_tardis_csv_gz(
             tmp_path / "bybit_book_snapshot_25_2024-01-01_ETHUSDT.csv.gz",
-            n_levels=3, n_rows=1,
+            n_levels=3,
+            n_rows=1,
         )
 
         df = load_directory(tmp_path, symbol="BTCUSDT")
@@ -160,6 +168,7 @@ class TestLoadDirectory:
 # ---------------------------------------------------------------------------
 # load_snapshots (direct Tardis → snapshots DataFrame)
 # ---------------------------------------------------------------------------
+
 
 class TestLoadSnapshots:
     def test_produces_snapshots_schema(self, tmp_path):
@@ -190,8 +199,7 @@ class TestLoadSnapshots:
     def test_subsampling(self, tmp_path):
         path = tmp_path / "book_snapshot_25_test.csv.gz"
         # 10 rows, 1μs apart — with 5μs interval should keep ~2-3
-        _make_tardis_csv_gz(path, n_levels=1, n_rows=10,
-                            base_ts_us=1700000000000000)
+        _make_tardis_csv_gz(path, n_levels=1, n_rows=10, base_ts_us=1700000000000000)
 
         # Rows are 1s apart (1_000_000 μs), interval=3s → ~4 rows
         df = load_snapshots(path, n_levels=1, sample_interval_us=3_000_000)
@@ -232,11 +240,13 @@ class TestLoadSnapshotsDirectory:
     def test_loads_multiple_files(self, tmp_path):
         _make_tardis_csv_gz(
             tmp_path / "bybit_book_snapshot_25_2024-01-01_BTCUSDT.csv.gz",
-            n_levels=3, n_rows=2,
+            n_levels=3,
+            n_rows=2,
         )
         _make_tardis_csv_gz(
             tmp_path / "bybit_book_snapshot_25_2024-01-02_BTCUSDT.csv.gz",
-            n_levels=3, n_rows=3,
+            n_levels=3,
+            n_rows=3,
             base_ts_us=1700100000000000,
         )
 
@@ -246,16 +256,16 @@ class TestLoadSnapshotsDirectory:
     def test_filters_by_symbol(self, tmp_path):
         _make_tardis_csv_gz(
             tmp_path / "bybit_book_snapshot_25_2024-01-01_BTCUSDT.csv.gz",
-            n_levels=3, n_rows=2,
+            n_levels=3,
+            n_rows=2,
         )
         _make_tardis_csv_gz(
             tmp_path / "bybit_book_snapshot_25_2024-01-01_ETHUSDT.csv.gz",
-            n_levels=3, n_rows=3,
+            n_levels=3,
+            n_rows=3,
         )
 
-        df = load_snapshots_directory(
-            tmp_path, symbol="BTCUSDT", n_levels=3, sample_interval_us=0
-        )
+        df = load_snapshots_directory(tmp_path, symbol="BTCUSDT", n_levels=3, sample_interval_us=0)
         assert len(df) == 2
 
     def test_empty_directory(self, tmp_path):

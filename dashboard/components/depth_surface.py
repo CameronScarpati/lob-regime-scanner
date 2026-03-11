@@ -38,9 +38,7 @@ def _build_depth_grid(
             bv = sub.loc[t_idx, f"bid_qty_{lvl}"]
             offset = bp - mid
             bin_idx = int(
-                (offset - price_offsets[0])
-                / (price_offsets[-1] - price_offsets[0])
-                * (n_bins - 1)
+                (offset - price_offsets[0]) / (price_offsets[-1] - price_offsets[0]) * (n_bins - 1)
             )
             if 0 <= bin_idx < n_bins:
                 volume_grid[t_idx, bin_idx] += bv
@@ -49,9 +47,7 @@ def _build_depth_grid(
             av = sub.loc[t_idx, f"ask_qty_{lvl}"]
             offset = ap - mid
             bin_idx = int(
-                (offset - price_offsets[0])
-                / (price_offsets[-1] - price_offsets[0])
-                * (n_bins - 1)
+                (offset - price_offsets[0]) / (price_offsets[-1] - price_offsets[0]) * (n_bins - 1)
             )
             if 0 <= bin_idx < n_bins:
                 volume_grid[t_idx, bin_idx] += av
@@ -118,10 +114,7 @@ def create_depth_surface_figure(
                 z=dict(show=False),
             ),
             hovertemplate=(
-                "Price Offset: %{x:.2f}<br>"
-                "Time Step: %{y}<br>"
-                "Volume: %{z:.2f}"
-                "<extra></extra>"
+                "Price Offset: %{x:.2f}<br>Time Step: %{y}<br>Volume: %{z:.2f}<extra></extra>"
             ),
         )
     )

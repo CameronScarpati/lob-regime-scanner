@@ -67,6 +67,33 @@ python data/download.py --exchange binance --symbol BTCUSDT \
   --start 2024-01-01 --end 2024-01-01
 ```
 
+#### Download Options
+
+```bash
+python data/download.py [OPTIONS]
+
+  --symbol TEXT          Trading pair (default: BTCUSDT)
+  --start DATE          Start date YYYY-MM-DD (required)
+  --end DATE            End date YYYY-MM-DD (required)
+  --exchange NAME       Exchange source (default: bybit)
+  --data-type TYPE      Tardis data type (default: book_snapshot_25)
+                        Choices: book_snapshot_25, book_snapshot_5, incremental_book_L2
+  --output-dir PATH     Output directory (default: data/raw/)
+  --tardis-api-key KEY  Tardis.dev API key (or set TARDIS_API_KEY env var)
+```
+
+#### Supported Exchanges
+
+| `--exchange` | Tardis API Target | Description |
+|-------------|-------------------|-------------|
+| `bybit` | `bybit` | Bybit derivatives (default) |
+| `binance` | `binance-futures` | Binance USD-M Futures |
+| `binance-spot` | `binance` | Binance spot market |
+| `okx` | `okex-swap` | OKX perpetual swaps |
+| `deribit` | `deribit` | Deribit options/futures |
+
+The exchange parameter only affects which data source is downloaded. Once stored locally, all exchanges use the same Tardis schema and the pipeline processes them identically.
+
 ### Dashboard Options
 
 ```bash
@@ -157,6 +184,14 @@ lob-regime-scanner/
 
 - [Methodology](docs/methodology.md) — Mathematical formulation of OFI, VPIN, Gaussian HMM, model selection criteria, and backtesting methodology
 - [Results](docs/results.md) — Key findings framed for quantitative research audience
+
+## Development
+
+```bash
+make test              # Run pytest suite (158 tests)
+make lint              # Run ruff linter
+make format            # Auto-format with ruff
+```
 
 ## References
 
