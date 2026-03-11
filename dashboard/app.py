@@ -129,6 +129,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Port to listen on (default: 8050)",
     )
     parser.add_argument(
+        "--sample-interval",
+        type=int,
+        default=100,
+        help="Snapshot subsampling interval in milliseconds (default: 100). "
+        "Lower values capture more microstructure detail but use more memory. "
+        "Try 1000 for faster loading, 10 for tick-level resolution.",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable Dash debug mode",
@@ -158,6 +166,7 @@ def load_data(args: argparse.Namespace) -> dict:
             symbol=args.symbol,
             start=args.start,
             end=args.end,
+            sample_interval_us=args.sample_interval * 1000,
         )
     except NoDataError as exc:
         print(
@@ -281,6 +290,10 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                             dmc.Group(gap=6, children=[
                                                 dmc.Badge("Model", size="xs", variant="light"),
                                                 dmc.Text("GaussianHMM (3 states)", size="sm", c="dimmed"),
+                                            ]),
+                                            dmc.Group(gap=6, children=[
+                                                dmc.Badge("Interval", size="xs", variant="light"),
+                                                dmc.Text(f"{args.sample_interval}ms", size="sm", c="dimmed"),
                                             ]),
                                             dmc.Group(gap=6, children=[
                                                 dmc.Badge("Source", size="xs", variant="light"),
