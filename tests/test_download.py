@@ -1,124 +1,209 @@
-"""Tests for Bybit data download module."""
+"""Tests for data download module (Tardis.dev)."""
 
-import gzip
-import io
-import json
-import zipfile
 from datetime import date
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from data.download import (
-    _build_url,
-    _build_legacy_url,
-    _save_zip_as_jsonl_gz,
-    download_day,
-    download_range,
+    _build_tardis_url,
+    _download_tardis_day,
+    download,
+    download_tardis,
 )
 
+# ---------------------------------------------------------------------------
+# Tardis URL building
+# ---------------------------------------------------------------------------
 
-class TestBuildUrl:
-    def test_linear_url(self):
-        url = _build_url("BTCUSDT", date(2025, 6, 15), "linear")
+
+class TestBuildTardisUrl:
+    def test_bybit_snapshot_url(self):
+        url = _build_tardis_url("bybit", "book_snapshot_25", date(2024, 1, 1), "BTCUSDT")
         assert url == (
-            "https://quote-saver.bycsi.com/orderbook/linear/BTCUSDT/"
-            "2025-06-15_BTCUSDT_ob200.data.zip"
+            "https://datasets.tardis.dev/v1/bybit/book_snapshot_25/2024/01/01/BTCUSDT.csv.gz"
         )
 
-    def test_spot_url(self):
-        url = _build_url("BTCUSDT", date(2025, 6, 15), "spot")
-        assert "spot/BTCUSDT" in url
-
-    def test_legacy_url(self):
-        url = _build_legacy_url("BTCUSDT", date(2025, 6, 15))
+    def test_binance_futures_url(self):
+        url = _build_tardis_url(
+            "binance-futures", "incremental_book_L2", date(2024, 3, 1), "ETHUSDT"
+        )
         assert url == (
-            "https://public.bybit.com/orderbook/BTCUSDT/2025-06-15.csv.gz"
+            "https://datasets.tardis.dev/v1/binance-futures/incremental_book_L2"
+            "/2024/03/01/ETHUSDT.csv.gz"
         )
 
-
-class TestSaveZipAsJsonlGz:
-    def test_extracts_json_lines(self, tmp_path):
-        # Create a ZIP in memory with JSON lines
-        records = [
-            json.dumps({"type": "snapshot", "ts": 1000, "data": {"b": [], "a": []}})
-            + "\n",
-            json.dumps({"type": "delta", "ts": 1001, "data": {"b": [], "a": []}})
-            + "\n",
-        ]
-
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as zf:
-            zf.writestr("data.jsonl", "".join(records))
-        zip_bytes = buf.getvalue()
-
-        out_path = tmp_path / "out.jsonl.gz"
-        result = _save_zip_as_jsonl_gz(zip_bytes, out_path)
-
-        assert result == out_path
-        assert out_path.exists()
-
-        # Read back and verify
-        with gzip.open(out_path, "rt") as f:
-            lines = [l.strip() for l in f if l.strip()]
-        assert len(lines) == 2
-        assert json.loads(lines[0])["type"] == "snapshot"
+    def test_pads_month_and_day(self):
+        url = _build_tardis_url("bybit", "book_snapshot_5", date(2024, 2, 5), "BTCUSDT")
+        assert "/2024/02/05/" in url
 
 
-class TestDownloadDay:
+# ---------------------------------------------------------------------------
+# Tardis _download_tardis_day (direct HTTP)
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadTardisDay:
     @patch("data.download.requests.get")
-    def test_skips_existing_file(self, mock_get, tmp_path):
-        existing = tmp_path / "BTCUSDT_2025-06-15.jsonl.gz"
-        existing.write_bytes(b"existing data")
+    def test_downloads_and_saves(self, mock_get, tmp_path):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b"fake,csv,data\n1,2,3\n"
+        mock_get.return_value = mock_resp
 
-        result = download_day("BTCUSDT", date(2025, 6, 15), tmp_path)
+        result = _download_tardis_day(
+            "bybit",
+            "book_snapshot_25",
+            date(2024, 1, 1),
+            "BTCUSDT",
+            tmp_path,
+        )
+
+        assert result is not None
+        assert result.exists()
+        assert result.name == "bybit_book_snapshot_25_2024-01-01_BTCUSDT.csv.gz"
+        assert result.read_bytes() == b"fake,csv,data\n1,2,3\n"
+
+    @patch("data.download.requests.get")
+    def test_sends_auth_header(self, mock_get, tmp_path):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b"data"
+        mock_get.return_value = mock_resp
+
+        _download_tardis_day(
+            "bybit",
+            "book_snapshot_25",
+            date(2024, 1, 1),
+            "BTCUSDT",
+            tmp_path,
+            api_key="test-key",
+        )
+
+        _, kwargs = mock_get.call_args
+        assert kwargs["headers"]["Authorization"] == "Bearer test-key"
+
+    @patch("data.download.requests.get")
+    def test_no_auth_header_without_key(self, mock_get, tmp_path):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b"data"
+        mock_get.return_value = mock_resp
+
+        _download_tardis_day(
+            "bybit",
+            "book_snapshot_25",
+            date(2024, 1, 1),
+            "BTCUSDT",
+            tmp_path,
+        )
+
+        _, kwargs = mock_get.call_args
+        assert "Authorization" not in kwargs["headers"]
+
+    @patch("data.download.requests.get")
+    def test_skips_existing(self, mock_get, tmp_path):
+        existing = tmp_path / "bybit_book_snapshot_25_2024-01-01_BTCUSDT.csv.gz"
+        existing.write_bytes(b"cached")
+
+        result = _download_tardis_day(
+            "bybit",
+            "book_snapshot_25",
+            date(2024, 1, 1),
+            "BTCUSDT",
+            tmp_path,
+        )
 
         assert result == existing
         mock_get.assert_not_called()
 
     @patch("data.download.requests.get")
-    def test_downloads_and_saves_zip(self, mock_get, tmp_path):
-        # Create mock ZIP response
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as zf:
-            zf.writestr("data.jsonl", '{"type":"snapshot","ts":1,"data":{"b":[],"a":[]}}\n')
-        zip_bytes = buf.getvalue()
-
+    def test_returns_none_on_401(self, mock_get, tmp_path):
         mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = zip_bytes
+        mock_resp.status_code = 401
         mock_get.return_value = mock_resp
 
-        result = download_day("BTCUSDT", date(2025, 6, 15), tmp_path)
-
-        assert result is not None
-        assert result.exists()
-        assert result.suffix == ".gz"
+        result = _download_tardis_day(
+            "bybit",
+            "book_snapshot_25",
+            date(2024, 6, 15),
+            "BTCUSDT",
+            tmp_path,
+        )
+        assert result is None
 
     @patch("data.download.requests.get")
-    def test_returns_none_on_failure(self, mock_get, tmp_path):
+    def test_returns_none_on_404(self, mock_get, tmp_path):
         mock_resp = MagicMock()
         mock_resp.status_code = 404
         mock_get.return_value = mock_resp
 
-        result = download_day("BTCUSDT", date(2025, 6, 15), tmp_path)
+        result = _download_tardis_day(
+            "bybit",
+            "book_snapshot_25",
+            date(2024, 1, 1),
+            "INVALID",
+            tmp_path,
+        )
         assert result is None
 
 
-class TestDownloadRange:
-    @patch("data.download.download_day")
-    def test_downloads_range(self, mock_dl, tmp_path):
+# ---------------------------------------------------------------------------
+# download (multi-day)
+# ---------------------------------------------------------------------------
+
+
+class TestDownload:
+    @patch("data.download._download_tardis_day")
+    def test_downloads_date_range(self, mock_dl, tmp_path):
         mock_dl.side_effect = [
-            tmp_path / "f1.jsonl.gz",
-            tmp_path / "f2.jsonl.gz",
-            None,  # One failed day
+            tmp_path / "f1.csv.gz",
+            tmp_path / "f2.csv.gz",
         ]
 
-        result = download_range("BTCUSDT", "2025-06-01", "2025-06-03", tmp_path)
+        result = download(
+            "BTCUSDT",
+            "2024-01-01",
+            "2024-01-02",
+            output_dir=tmp_path,
+        )
         assert len(result) == 2
-        assert mock_dl.call_count == 3
+        assert mock_dl.call_count == 2
+
+    @patch("data.download._download_tardis_day")
+    def test_maps_exchange_name(self, mock_dl, tmp_path):
+        mock_dl.return_value = tmp_path / "f.csv.gz"
+
+        download(
+            "BTCUSDT",
+            "2024-01-01",
+            "2024-01-01",
+            output_dir=tmp_path,
+            exchange="binance",
+        )
+
+        # Should map "binance" -> "binance-futures"
+        _, kwargs = mock_dl.call_args
+        assert kwargs["exchange"] == "binance-futures"
+
+    @patch("data.download._download_tardis_day")
+    def test_passes_api_key(self, mock_dl, tmp_path):
+        mock_dl.return_value = tmp_path / "f.csv.gz"
+
+        download(
+            "BTCUSDT",
+            "2024-01-01",
+            "2024-01-01",
+            output_dir=tmp_path,
+            api_key="my-key",
+        )
+
+        _, kwargs = mock_dl.call_args
+        assert kwargs["api_key"] == "my-key"
 
     def test_invalid_range_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="end .* must be >= start"):
-            download_range("BTCUSDT", "2025-06-15", "2025-06-10", tmp_path)
+        with pytest.raises(ValueError, match=r"end .* must be >= start"):
+            download("BTCUSDT", "2024-02-01", "2024-01-01", tmp_path)
+
+    def test_download_tardis_alias(self):
+        assert download_tardis is download

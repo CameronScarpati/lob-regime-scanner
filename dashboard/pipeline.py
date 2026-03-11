@@ -1,4 +1,4 @@
-"""Full data pipeline: load > reconstruct > features > HMM > backtest.
+"""Full data pipeline: load > features > HMM > backtest.
 
 Wires the src modules together and produces DataFrames in the schema
 expected by the dashboard components.
@@ -12,15 +12,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.data_loader import load_directory
-from src.book_reconstructor import (
-    reconstruct,
-    snapshots_to_dataframe,
-    resample_snapshots,
-)
-from src.features import build_feature_matrix
-from src.hmm_model import RegimeDetector, REGIME_LABELS
 from src.backtest import run_backtest
+from src.data_loader import load_snapshots_directory
+from src.features import build_feature_matrix
+from src.hmm_model import REGIME_LABELS, RegimeDetector
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +41,7 @@ def _find_data_files(
             "Run `python data/download.py` to fetch order book snapshots first."
         )
 
-    patterns = ["*.jsonl.gz", "*.jsonl", "*.csv.gz", "*.csv"]
+    patterns = ["*.csv.gz", "*.csv"]
     files = []
     for pat in patterns:
         files.extend(DATA_DIR.glob(pat))
@@ -66,7 +61,7 @@ def run_pipeline(
     symbol: str = "BTCUSDT",
     start: str | None = None,
     end: str | None = None,
-    resample_interval_us: int = 1_000_000,
+    sample_interval_us: int = 100_000,
     hmm_n_states: int = 3,
 ) -> dict:
     """Execute the full LOB analysis pipeline.
@@ -77,8 +72,8 @@ def run_pipeline(
         Trading pair symbol (e.g. ``BTCUSDT``).
     start / end : str or None
         ISO date strings to filter the data range (e.g. ``2025-01-01``).
-    resample_interval_us : int
-        Resampling interval in microseconds (default 1s).
+    sample_interval_us : int
+        Snapshot subsampling interval in microseconds (default 100ms).
     hmm_n_states : int
         Number of HMM states (default 3).
 
@@ -87,7 +82,7 @@ def run_pipeline(
     dict compatible with dashboard components::
 
         {
-            "snapshots": pd.DataFrame,   # book_reconstructor schema + datetime timestamp col
+            "snapshots": pd.DataFrame,   # snapshots schema + datetime timestamp col
             "features": pd.DataFrame,    # columns expected by diagnostics panel
             "hmm": {
                 "states": np.ndarray,
@@ -104,39 +99,31 @@ def run_pipeline(
     """
     data_dir = _find_data_files(symbol, start, end)
 
-    # ── Step 1: Load raw events ──────────────────────────────────────────
-    logger.info("Loading raw events for %s from %s ...", symbol, data_dir)
-    events = load_directory(data_dir, symbol=symbol)
-    if events.empty:
-        raise NoDataError(f"Loaded 0 events for {symbol}. Check your data files.")
+    # ── Step 1: Load snapshots directly from Tardis CSV ──────────────────
+    logger.info("Loading snapshots for %s from %s ...", symbol, data_dir)
+    snap_df = load_snapshots_directory(
+        data_dir,
+        symbol=symbol,
+        sample_interval_us=sample_interval_us,
+    )
+    if snap_df.empty:
+        raise NoDataError(f"Loaded 0 snapshots for {symbol}. Check your data files.")
 
     # Filter by date range if specified
     if start is not None:
         start_us = int(pd.Timestamp(start).timestamp() * 1e6)
-        events = events[events["timestamp_us"] >= start_us]
+        snap_df = snap_df[snap_df["timestamp"] >= start_us]
     if end is not None:
-        # Make end-date inclusive of the full day
         end_ts = pd.Timestamp(end)
-        if end_ts == end_ts.normalize():  # date-only, no time component
+        if end_ts == end_ts.normalize():
             end_ts = end_ts + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
         end_us = int(end_ts.timestamp() * 1e6)
-        events = events[events["timestamp_us"] <= end_us]
+        snap_df = snap_df[snap_df["timestamp"] <= end_us]
 
-    if events.empty:
-        raise NoDataError(
-            f"No events remain after date filtering ({start} – {end})."
-        )
-
-    logger.info("Loaded %d raw events", len(events))
-
-    # ── Step 2: Reconstruct order book snapshots ─────────────────────────
-    logger.info("Reconstructing order book ...")
-    raw_snapshots = reconstruct(events)
-    snap_df = snapshots_to_dataframe(raw_snapshots)
     if snap_df.empty:
-        raise NoDataError("Order book reconstruction produced 0 snapshots.")
+        raise NoDataError(f"No snapshots remain after date filtering ({start} – {end}).")
 
-    snap_df = resample_snapshots(snap_df, interval_us=resample_interval_us)
+    snap_df = snap_df.reset_index(drop=True)
 
     # Add placeholder trade fields if missing
     if "last_trade_price" not in snap_df.columns:
@@ -144,13 +131,13 @@ def run_pipeline(
         snap_df["last_trade_qty"] = np.nan
         snap_df["last_trade_side"] = ""
 
-    logger.info("Resampled to %d snapshots", len(snap_df))
+    logger.info("Loaded %d snapshots", len(snap_df))
 
-    # ── Step 3: Compute features ─────────────────────────────────────────
+    # ── Step 2: Compute features ─────────────────────────────────────────
     logger.info("Computing features ...")
     feature_matrix = build_feature_matrix(snap_df)
 
-    # ── Step 4: Fit HMM and decode regimes ───────────────────────────────
+    # ── Step 3: Fit HMM and decode regimes ───────────────────────────────
     logger.info("Fitting HMM with %d states ...", hmm_n_states)
     detector = RegimeDetector(
         n_states=hmm_n_states,
@@ -168,14 +155,18 @@ def run_pipeline(
         detector.diagnostics.log_likelihood,
     )
 
-    # ── Step 5: Run backtest ─────────────────────────────────────────────
+    # ── Step 4: Run backtest ─────────────────────────────────────────────
     logger.info("Running backtest ...")
     mid = snap_df["mid_price"].values
     returns = np.diff(np.log(mid), prepend=np.log(mid[0]))
 
     # Use the first OFI column available
     ofi_col = next(
-        (c for c in feature_matrix.columns if c.startswith("ofi_") and "_zscore" not in c and "_velocity" not in c),
+        (
+            c
+            for c in feature_matrix.columns
+            if c.startswith("ofi_") and "_zscore" not in c and "_velocity" not in c
+        ),
         None,
     )
     ofi = feature_matrix[ofi_col].values if ofi_col else np.zeros(len(states))
@@ -188,7 +179,7 @@ def run_pipeline(
         bt.n_trades,
     )
 
-    # ── Step 6: Prepare dashboard-compatible output ──────────────────────
+    # ── Step 5: Prepare dashboard-compatible output ──────────────────────
     # Subsample for dashboard performance (target ~3600 points max)
     max_display = 3600
     if len(snap_df) > max_display:
