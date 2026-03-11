@@ -5,9 +5,9 @@ REGIME_NAMES = {0: "Quiet", 1: "Trending", 2: "Toxic"}
 # Refined palette: softer, publication-friendly colours that remain
 # distinguishable on dark backgrounds and in print (colour-blind safe).
 REGIME_COLORS = {
-    0: "#4CAF82",   # muted sage green  (Quiet)
-    1: "#5C9CF5",   # soft cornflower   (Trending)
-    2: "#EF6C6C",   # muted coral red   (Toxic)
+    0: "#4CAF82",  # muted sage green  (Quiet)
+    1: "#5C9CF5",  # soft cornflower   (Trending)
+    2: "#EF6C6C",  # muted coral red   (Toxic)
 }
 
 # Semi-transparent fills for regime backgrounds
@@ -51,9 +51,7 @@ PANEL_DESCRIPTIONS = {
 # ── Plotly typography ──
 # Use a professional, highly-readable sans-serif stack.
 # "Inter" is the primary web font; fallback to system UI fonts.
-_FONT_FAMILY = (
-    '"Inter", "Helvetica Neue", Helvetica, Arial, sans-serif'
-)
+_FONT_FAMILY = '"Inter", "Helvetica Neue", Helvetica, Arial, sans-serif'
 
 # Plotly layout defaults for a clean, publication-ready dark theme
 PLOTLY_LAYOUT_DEFAULTS = dict(

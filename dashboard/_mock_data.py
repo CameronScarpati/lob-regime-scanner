@@ -9,8 +9,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from dashboard._constants import REGIME_COLORS, REGIME_NAMES
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -22,6 +20,7 @@ _RNG = np.random.default_rng(42)
 # ---------------------------------------------------------------------------
 # Helper: regime sequence via Markov chain
 # ---------------------------------------------------------------------------
+
 
 def _generate_regime_sequence(n: int, transition_matrix: np.ndarray) -> np.ndarray:
     """Sample a regime path from a 3-state Markov chain."""
@@ -36,13 +35,16 @@ def _generate_regime_sequence(n: int, transition_matrix: np.ndarray) -> np.ndarr
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def generate_transition_matrix() -> np.ndarray:
     """Return a realistic 3x3 HMM transition matrix."""
-    tm = np.array([
-        [0.96, 0.03, 0.01],  # Quiet  -> mostly stays quiet
-        [0.05, 0.90, 0.05],  # Trending -> somewhat persistent
-        [0.10, 0.05, 0.85],  # Toxic -> high self-persistence
-    ])
+    tm = np.array(
+        [
+            [0.96, 0.03, 0.01],  # Quiet  -> mostly stays quiet
+            [0.05, 0.90, 0.05],  # Trending -> somewhat persistent
+            [0.10, 0.05, 0.85],  # Toxic -> high self-persistence
+        ]
+    )
     return tm
 
 
@@ -136,13 +138,9 @@ def generate_features(
         "OFI_10": _RNG.normal(ofi_mean * 0.6, ofi_std * 0.8),
         "OFI_velocity": _RNG.normal(0, 0.1, n_timestamps),
         "VPIN": np.clip(vpin_base + _RNG.normal(0, 0.08, n_timestamps), 0, 1),
-        "book_imbalance": np.clip(
-            _RNG.normal(ofi_mean * 0.3, 0.2, n_timestamps), -1, 1
-        ),
+        "book_imbalance": np.clip(_RNG.normal(ofi_mean * 0.3, 0.2, n_timestamps), -1, 1),
         "weighted_mid": 42000.0 + _RNG.normal(0, 10, n_timestamps),
-        "spread_bps": np.clip(
-            spread_base + _RNG.normal(0, 0.5, n_timestamps), 0.5, 15.0
-        ),
+        "spread_bps": np.clip(spread_base + _RNG.normal(0, 0.5, n_timestamps), 0.5, 15.0),
         "kyle_lambda": np.clip(
             np.where(regimes == 0, 0.01, np.where(regimes == 1, 0.02, 0.05))
             + _RNG.normal(0, 0.005, n_timestamps),
@@ -150,27 +148,22 @@ def generate_features(
             0.2,
         ),
         "trade_aggression": np.clip(
-            _RNG.beta(2, 5, n_timestamps)
-            + np.where(regimes == 2, 0.2, 0.0),
+            _RNG.beta(2, 5, n_timestamps) + np.where(regimes == 2, 0.2, 0.0),
             0,
             1,
         ),
         "cancel_ratio": np.clip(_RNG.beta(3, 7, n_timestamps), 0, 1),
         "realized_vol_1s": np.abs(
-            _RNG.normal(0.0001, 0.00005, n_timestamps)
-            * np.where(regimes == 2, 3, 1)
+            _RNG.normal(0.0001, 0.00005, n_timestamps) * np.where(regimes == 2, 3, 1)
         ),
         "realized_vol_10s": np.abs(
-            _RNG.normal(0.0003, 0.0001, n_timestamps)
-            * np.where(regimes == 2, 3, 1)
+            _RNG.normal(0.0003, 0.0001, n_timestamps) * np.where(regimes == 2, 3, 1)
         ),
         "realized_vol_60s": np.abs(
-            _RNG.normal(0.0008, 0.0003, n_timestamps)
-            * np.where(regimes == 2, 3, 1)
+            _RNG.normal(0.0008, 0.0003, n_timestamps) * np.where(regimes == 2, 3, 1)
         ),
         "realized_vol_300s": np.abs(
-            _RNG.normal(0.002, 0.0007, n_timestamps)
-            * np.where(regimes == 2, 3, 1)
+            _RNG.normal(0.002, 0.0007, n_timestamps) * np.where(regimes == 2, 3, 1)
         ),
     }
 
@@ -204,9 +197,7 @@ def generate_hmm_output(
     # Smooth probabilities with a small moving average for realism
     kernel = np.ones(10) / 10
     for col in range(3):
-        state_probs[:, col] = np.convolve(
-            state_probs[:, col], kernel, mode="same"
-        )
+        state_probs[:, col] = np.convolve(state_probs[:, col], kernel, mode="same")
     # Re-normalize rows
     row_sums = state_probs.sum(axis=1, keepdims=True)
     state_probs = state_probs / row_sums

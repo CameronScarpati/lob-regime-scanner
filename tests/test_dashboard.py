@@ -1,7 +1,6 @@
 """Tests for the Plotly Dash dashboard components, mock data, and pipeline."""
 
 import numpy as np
-import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
@@ -14,15 +13,15 @@ from dashboard._mock_data import (
     generate_snapshots,
     generate_transition_matrix,
 )
-from dashboard.components.heatmap import create_heatmap_figure
-from dashboard.components.regime_probs import create_regime_probs_figure
 from dashboard.components.depth_surface import create_depth_surface_figure
 from dashboard.components.diagnostics import create_diagnostics_figure
-
+from dashboard.components.heatmap import create_heatmap_figure
+from dashboard.components.regime_probs import create_regime_probs_figure
 
 # ---------------------------------------------------------------------------
 # Mock data tests
 # ---------------------------------------------------------------------------
+
 
 class TestMockData:
     def test_transition_matrix_shape_and_rows_sum_to_one(self):
@@ -56,10 +55,21 @@ class TestMockData:
         df = generate_features(n_timestamps=50)
         assert len(df) == 50
         expected_cols = [
-            "timestamp", "OFI_1", "OFI_5", "OFI_10", "OFI_velocity",
-            "VPIN", "book_imbalance", "weighted_mid", "spread_bps",
-            "kyle_lambda", "trade_aggression", "cancel_ratio",
-            "realized_vol_1s", "realized_vol_10s", "realized_vol_60s",
+            "timestamp",
+            "OFI_1",
+            "OFI_5",
+            "OFI_10",
+            "OFI_velocity",
+            "VPIN",
+            "book_imbalance",
+            "weighted_mid",
+            "spread_bps",
+            "kyle_lambda",
+            "trade_aggression",
+            "cancel_ratio",
+            "realized_vol_1s",
+            "realized_vol_10s",
+            "realized_vol_60s",
             "realized_vol_300s",
         ]
         for col in expected_cols:
@@ -107,6 +117,7 @@ class TestMockData:
 # Component figure tests
 # ---------------------------------------------------------------------------
 
+
 class TestHeatmapPanel:
     @pytest.fixture()
     def data(self):
@@ -123,8 +134,9 @@ class TestHeatmapPanel:
 
     def test_dark_template(self, data):
         fig = create_heatmap_figure(data["snapshots"], data["hmm"]["states"])
-        assert fig.layout.template.layout.paper_bgcolor is not None or \
-            "plotly_dark" in str(fig.layout.template)
+        assert fig.layout.template.layout.paper_bgcolor is not None or "plotly_dark" in str(
+            fig.layout.template
+        )
 
 
 class TestRegimeProbsPanel:
@@ -188,9 +200,11 @@ class TestDiagnosticsPanel:
 # App and CLI tests
 # ---------------------------------------------------------------------------
 
+
 class TestAppCLI:
     def test_parse_args_defaults(self):
         from dashboard.app import parse_args
+
         args = parse_args([])
         assert args.symbol == "BTCUSDT"
         assert args.start is None
@@ -199,22 +213,30 @@ class TestAppCLI:
 
     def test_parse_args_demo(self):
         from dashboard.app import parse_args
+
         args = parse_args(["--demo"])
         assert args.demo is True
 
     def test_parse_args_full(self):
         from dashboard.app import parse_args
-        args = parse_args([
-            "--symbol", "ETHUSDT",
-            "--start", "2025-01-01",
-            "--end", "2025-01-14",
-        ])
+
+        args = parse_args(
+            [
+                "--symbol",
+                "ETHUSDT",
+                "--start",
+                "2025-01-01",
+                "--end",
+                "2025-01-14",
+            ]
+        )
         assert args.symbol == "ETHUSDT"
         assert args.start == "2025-01-01"
         assert args.end == "2025-01-14"
 
     def test_create_app_demo_mode(self):
         from dashboard.app import create_app, parse_args
+
         args = parse_args(["--demo"])
         app = create_app(args)
         assert app is not None
@@ -222,6 +244,7 @@ class TestAppCLI:
 
     def test_load_data_demo(self):
         from dashboard.app import load_data, parse_args
+
         args = parse_args(["--demo"])
         data = load_data(args)
         assert "snapshots" in data
@@ -234,12 +257,15 @@ class TestAppCLI:
 # Pipeline tests
 # ---------------------------------------------------------------------------
 
+
 class TestPipeline:
     def test_no_data_error_when_no_files(self):
         from dashboard.pipeline import NoDataError, _find_data_files
+
         with pytest.raises(NoDataError):
             _find_data_files("NONEXISTENT_SYMBOL_XYZ")
 
     def test_no_data_error_is_exception(self):
         from dashboard.pipeline import NoDataError
+
         assert issubclass(NoDataError, Exception)

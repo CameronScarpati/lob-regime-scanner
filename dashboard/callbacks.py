@@ -5,14 +5,12 @@ Handles time range selection and regime filtering via DMC components.
 
 from __future__ import annotations
 
-import numpy as np
-import pandas as pd
-from dash import Dash, Input, Output, State, callback_context, no_update
+from dash import Dash, Input, Output
 
-from dashboard.components.heatmap import create_heatmap_figure
-from dashboard.components.regime_probs import create_regime_probs_figure
 from dashboard.components.depth_surface import create_depth_surface_figure
 from dashboard.components.diagnostics import create_diagnostics_figure
+from dashboard.components.heatmap import create_heatmap_figure
+from dashboard.components.regime_probs import create_regime_probs_figure
 
 
 def register_callbacks(app: Dash, data: dict | None = None) -> None:
@@ -28,6 +26,7 @@ def register_callbacks(app: Dash, data: dict | None = None) -> None:
     """
     if data is None:
         from dashboard._mock_data import generate_all
+
         data = generate_all(n_timestamps=3600)
 
     _data = data
@@ -69,9 +68,7 @@ def register_callbacks(app: Dash, data: dict | None = None) -> None:
         display_states = states_sub.copy()
 
         heatmap_fig = create_heatmap_figure(snap_sub, display_states)
-        regime_fig = create_regime_probs_figure(
-            timestamps_sub, probs_sub, hmm["transition_matrix"]
-        )
+        regime_fig = create_regime_probs_figure(timestamps_sub, probs_sub, hmm["transition_matrix"])
         depth_fig = create_depth_surface_figure(snap_sub, display_states)
         diag_fig = create_diagnostics_figure(feat_sub, display_states, pnl_sub)
 

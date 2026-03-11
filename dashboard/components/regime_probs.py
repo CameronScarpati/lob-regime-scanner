@@ -54,10 +54,7 @@ def create_regime_probs_figure(
                 fillcolor=f"rgba({r},{g},{b},{fill_opacity})",
                 stackgroup="one",
                 name=REGIME_NAMES[state_id],
-                hovertemplate=(
-                    f"{REGIME_NAMES[state_id]}: "
-                    "%{y:.1%}<extra></extra>"
-                ),
+                hovertemplate=(f"{REGIME_NAMES[state_id]}: %{{y:.1%}}<extra></extra>"),
             ),
             row=1,
             col=1,
@@ -65,9 +62,7 @@ def create_regime_probs_figure(
 
     # --- Transition matrix heatmap ---
     state_labels = [REGIME_NAMES[i] for i in range(3)]
-    text_matrix = [
-        [f"{transition_matrix[i, j]:.3f}" for j in range(3)] for i in range(3)
-    ]
+    text_matrix = [[f"{transition_matrix[i, j]:.3f}" for j in range(3)] for i in range(3)]
 
     # Clean monochrome colorscale for the matrix
     tm_colorscale = [
@@ -90,28 +85,34 @@ def create_regime_probs_figure(
             showscale=False,
             xgap=3,
             ygap=3,
-            hovertemplate=(
-                "From: %{y}<br>To: %{x}<br>P = %{z:.3f}<extra></extra>"
-            ),
+            hovertemplate=("From: %{y}<br>To: %{x}<br>P = %{z:.3f}<extra></extra>"),
         ),
         row=1,
         col=2,
     )
 
     fig.update_yaxes(
-        title_text="Probability", range=[0, 1], row=1, col=1,
+        title_text="Probability",
+        range=[0, 1],
+        row=1,
+        col=1,
         **AXIS_STYLE,
     )
     fig.update_xaxes(
-        title_text="", row=1, col=1,
+        title_text="",
+        row=1,
+        col=1,
         **XAXIS_STYLE,
     )
     fig.update_yaxes(
-        autorange="reversed", row=1, col=2,
+        autorange="reversed",
+        row=1,
+        col=2,
         tickfont=dict(size=11, color="#98a2ae"),
     )
     fig.update_xaxes(
-        row=1, col=2,
+        row=1,
+        col=2,
         tickfont=dict(size=11, color="#98a2ae"),
         side="bottom",
     )

@@ -1,21 +1,15 @@
-"""Parse L2 order book data into pandas DataFrames.
+"""Parse Tardis book_snapshot CSV data into pandas DataFrames.
 
-Handles three formats:
-  1. JSONL (.jsonl.gz) — Line-delimited JSON with snapshot/delta records
-     from quote-saver.bycsi.com. Each record has 'type' (snapshot/delta),
-     'ts' (ms timestamp), and 'data' with 'b' (bids) and 'a' (asks).
-  2. Legacy CSV (.csv.gz) — Older public.bybit.com format with columns:
-     timestamp, side, price, qty.
-  3. Tardis book_snapshot CSV (.csv.gz) — Pre-reconstructed snapshots from
-     tardis.dev with columns: timestamp, local_timestamp,
-     asks[0..N].price, asks[0..N].amount, bids[0..N].price, bids[0..N].amount.
+Handles Tardis book_snapshot CSV (.csv.gz) — Pre-reconstructed snapshots
+from tardis.dev with columns: timestamp, local_timestamp,
+asks[0..N].price, asks[0..N].amount, bids[0..N].price, bids[0..N].amount.
 
-The primary output is a DataFrame of raw order book events that can be
-fed into the BookReconstructor.
+Provides two loading paths:
+  - load(): Expands into per-level events for BookReconstructor (slow, legacy)
+  - load_snapshots(): Converts directly to the snapshots DataFrame format
+    used by the features pipeline — much faster, skips reconstruct step.
 """
 
-import gzip
-import json
 import logging
 from pathlib import Path
 
@@ -24,170 +18,12 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-
-def load_jsonl(path: Path | str, max_records: int | None = None) -> pd.DataFrame:
-    """Load Bybit JSONL order book data into a DataFrame.
-
-    Each JSON record is flattened into rows — one row per price level
-    per update. Snapshot records provide the full book state; delta
-    records provide incremental changes.
-
-    Args:
-        path: Path to the .jsonl.gz or .jsonl file.
-        max_records: If set, stop after this many JSON records (for testing).
-
-    Returns:
-        DataFrame with columns:
-            timestamp_us: int64 (microseconds since epoch)
-            type: str ('snapshot' or 'delta')
-            side: str ('bid' or 'ask')
-            price: float64
-            qty: float64
-            update_id: int64
-            seq: int64
-    """
-    path = Path(path)
-    records = []
-    opener = gzip.open if path.suffix == ".gz" else open
-
-    with opener(path, "rt", encoding="utf-8") as f:
-        for i, line in enumerate(f):
-            if max_records is not None and i >= max_records:
-                break
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                msg = json.loads(line)
-            except json.JSONDecodeError:
-                logger.warning("Skipping malformed JSON at line %d", i)
-                continue
-
-            ts_ms = msg.get("ts", 0)
-            ts_us = int(ts_ms * 1000)  # ms -> μs
-            rec_type = msg.get("type", "unknown")
-            data = msg.get("data", {})
-            update_id = data.get("u", 0)
-            seq = data.get("seq", 0)
-
-            for price_str, qty_str in data.get("b", []):
-                records.append(
-                    (ts_us, rec_type, "bid", float(price_str), float(qty_str),
-                     update_id, seq)
-                )
-            for price_str, qty_str in data.get("a", []):
-                records.append(
-                    (ts_us, rec_type, "ask", float(price_str), float(qty_str),
-                     update_id, seq)
-                )
-
-    if not records:
-        return pd.DataFrame(
-            columns=["timestamp_us", "type", "side", "price", "qty",
-                      "update_id", "seq"]
-        )
-
-    df = pd.DataFrame(
-        records,
-        columns=["timestamp_us", "type", "side", "price", "qty",
-                  "update_id", "seq"],
-    )
-    df["price"] = df["price"].astype(np.float64)
-    df["qty"] = df["qty"].astype(np.float64)
-    df["update_id"] = df["update_id"].astype(np.int64)
-    df["seq"] = df["seq"].astype(np.int64)
-
-    logger.info(
-        "Loaded %d rows from %s (%d records, ts range %.3fs)",
-        len(df),
-        path.name,
-        max_records or i + 1,
-        (df["timestamp_us"].max() - df["timestamp_us"].min()) / 1e6,
-    )
-    return df
+# Default: keep one snapshot per 100ms — fast enough for microstructure
+# signals (OFI, spread dynamics) while keeping data tractable (~864k/day).
+DEFAULT_SAMPLE_INTERVAL_US = 100_000
 
 
-def load_csv(path: Path | str) -> pd.DataFrame:
-    """Load legacy CSV format order book data.
-
-    Expected columns: timestamp, side, price, qty
-    Timestamp may be in seconds (float) or microseconds (int).
-
-    Args:
-        path: Path to the .csv.gz or .csv file.
-
-    Returns:
-        DataFrame with columns:
-            timestamp_us: int64 (microseconds since epoch)
-            type: str (always 'delta' for CSV format)
-            side: str ('bid' or 'ask')
-            price: float64
-            qty: float64
-            update_id: int64 (always 0)
-            seq: int64 (always 0)
-    """
-    path = Path(path)
-    df = pd.read_csv(path)
-
-    # Normalize column names (handle various Bybit CSV header formats)
-    col_map = {}
-    for col in df.columns:
-        lower = col.lower().strip()
-        if "time" in lower:
-            col_map[col] = "timestamp"
-        elif lower in ("side",):
-            col_map[col] = "side"
-        elif lower in ("price",):
-            col_map[col] = "price"
-        elif lower in ("qty", "quantity", "size", "amount"):
-            col_map[col] = "qty"
-    df = df.rename(columns=col_map)
-
-    # Convert timestamp to microseconds
-    if "timestamp" in df.columns:
-        ts = df["timestamp"].astype(np.float64)
-        if ts.max() < 1e12:  # seconds
-            df["timestamp_us"] = (ts * 1e6).astype(np.int64)
-        elif ts.max() < 1e15:  # milliseconds
-            df["timestamp_us"] = (ts * 1e3).astype(np.int64)
-        else:  # already microseconds
-            df["timestamp_us"] = ts.astype(np.int64)
-    else:
-        raise ValueError(f"No timestamp column found in {path}")
-
-    # Normalize side
-    df["side"] = df["side"].str.lower().str.strip()
-    df["side"] = df["side"].replace({"buy": "bid", "sell": "ask", "b": "bid", "a": "ask"})
-
-    df["type"] = "delta"
-    df["update_id"] = np.int64(0)
-    df["seq"] = np.int64(0)
-
-    result = df[["timestamp_us", "type", "side", "price", "qty",
-                  "update_id", "seq"]].copy()
-    result["price"] = result["price"].astype(np.float64)
-    result["qty"] = result["qty"].astype(np.float64)
-
-    logger.info("Loaded %d rows from CSV %s", len(result), path.name)
-    return result
-
-
-def _is_tardis_snapshot(path: Path) -> bool:
-    """Detect whether a CSV file is in Tardis book_snapshot format."""
-    name = path.name.lower()
-    if "book_snapshot" in name:
-        return True
-    # Peek at headers to detect Tardis format
-    try:
-        opener = gzip.open if name.endswith(".gz") else open
-        with opener(path, "rt", encoding="utf-8") as f:
-            header = f.readline().strip()
-        return "asks[0].price" in header or "bids[0].price" in header
-    except Exception:
-        return False
-
-
-def load_tardis_snapshot(path: Path | str, max_rows: int | None = None) -> pd.DataFrame:
+def load(path: Path | str, max_rows: int | None = None) -> pd.DataFrame:
     """Load a Tardis book_snapshot CSV and convert to the event format.
 
     Tardis book_snapshot_25 files have columns:
@@ -239,54 +75,51 @@ def load_tardis_snapshot(path: Path | str, max_rows: int | None = None) -> pd.Da
     timestamps = df[ts_col].values.astype(np.int64)
 
     # If timestamps look like milliseconds, convert to microseconds
-    if timestamps.max() < 1e15:
+    if len(timestamps) > 0 and timestamps.max() < 1e15:
         timestamps = timestamps * 1000
 
-    records = []
+    n_rows = len(df)
+    frames = []
 
-    for row_idx in range(len(df)):
-        ts_us = int(timestamps[row_idx])
+    # Vectorized extraction — process all rows at once per level
+    for side, price_cols in [("ask", ask_price_cols), ("bid", bid_price_cols)]:
+        for _i, pcol in enumerate(price_cols):
+            acol = pcol.replace(".price", ".amount")
+            prices = df[pcol].values.astype(np.float64)
+            qtys = df[acol].values.astype(np.float64)
 
-        # Ask levels
-        for i in range(n_ask_levels):
-            price_col = f"asks[{i}].price"
-            amount_col = f"asks[{i}].amount"
-            price = df.iloc[row_idx][price_col]
-            qty = df.iloc[row_idx][amount_col]
-            if pd.notna(price) and pd.notna(qty) and float(qty) > 0:
-                records.append((ts_us, "snapshot", "ask", float(price), float(qty), 0, 0))
+            # Filter out NaN and zero-quantity levels
+            mask = np.isfinite(prices) & np.isfinite(qtys) & (qtys > 0)
+            n_valid = mask.sum()
+            if n_valid == 0:
+                continue
 
-        # Bid levels
-        for i in range(n_bid_levels):
-            price_col = f"bids[{i}].price"
-            amount_col = f"bids[{i}].amount"
-            price = df.iloc[row_idx][price_col]
-            qty = df.iloc[row_idx][amount_col]
-            if pd.notna(price) and pd.notna(qty) and float(qty) > 0:
-                records.append((ts_us, "snapshot", "bid", float(price), float(qty), 0, 0))
+            level_df = pd.DataFrame(
+                {
+                    "timestamp_us": timestamps[mask],
+                    "type": "snapshot",
+                    "side": side,
+                    "price": prices[mask],
+                    "qty": qtys[mask],
+                    "update_id": np.int64(0),
+                    "seq": np.int64(0),
+                }
+            )
+            frames.append(level_df)
 
-    if not records:
+    if not frames:
         return pd.DataFrame(
-            columns=["timestamp_us", "type", "side", "price", "qty",
-                      "update_id", "seq"]
+            columns=["timestamp_us", "type", "side", "price", "qty", "update_id", "seq"]
         )
 
-    result = pd.DataFrame(
-        records,
-        columns=["timestamp_us", "type", "side", "price", "qty",
-                  "update_id", "seq"],
-    )
-    result["price"] = result["price"].astype(np.float64)
-    result["qty"] = result["qty"].astype(np.float64)
-    result["update_id"] = result["update_id"].astype(np.int64)
-    result["seq"] = result["seq"].astype(np.int64)
+    result = pd.concat(frames, ignore_index=True)
+    result = result.sort_values("timestamp_us").reset_index(drop=True)
 
     logger.info(
-        "Loaded %d rows from Tardis snapshot %s (%d snapshots, %d+%d levels/side, "
-        "ts range %.3fs)",
+        "Loaded %d rows from Tardis snapshot %s (%d snapshots, %d+%d levels/side, ts range %.3fs)",
         len(result),
         path.name,
-        len(df),
+        n_rows,
         n_bid_levels,
         n_ask_levels,
         (result["timestamp_us"].max() - result["timestamp_us"].min()) / 1e6,
@@ -294,33 +127,8 @@ def load_tardis_snapshot(path: Path | str, max_rows: int | None = None) -> pd.Da
     return result
 
 
-def load(path: Path | str, **kwargs) -> pd.DataFrame:
-    """Auto-detect format and load order book data.
-
-    Args:
-        path: Path to data file (.jsonl.gz, .jsonl, .csv.gz, or .csv).
-        **kwargs: Passed to the underlying loader.
-
-    Returns:
-        Unified DataFrame with consistent schema.
-    """
-    path = Path(path)
-    name = path.name.lower()
-
-    if ".jsonl" in name:
-        return load_jsonl(path, **kwargs)
-    elif ".csv" in name:
-        if _is_tardis_snapshot(path):
-            return load_tardis_snapshot(path, **kwargs)
-        return load_csv(path, **kwargs)
-    else:
-        # Try JSONL first, fall back to CSV
-        try:
-            return load_jsonl(path, **kwargs)
-        except (json.JSONDecodeError, KeyError):
-            if _is_tardis_snapshot(path):
-                return load_tardis_snapshot(path, **kwargs)
-            return load_csv(path, **kwargs)
+# Keep old name as alias for backwards compatibility in imports
+load_tardis_snapshot = load
 
 
 def load_directory(
@@ -343,7 +151,7 @@ def load_directory(
     directory = Path(directory)
     frames = []
 
-    patterns = ["*.jsonl.gz", "*.jsonl", "*.csv.gz", "*.csv"]
+    patterns = ["*.csv.gz", "*.csv"]
     files = []
     for pattern in patterns:
         files.extend(directory.glob(pattern))
@@ -356,8 +164,7 @@ def load_directory(
     if not files:
         logger.warning("No data files found in %s", directory)
         return pd.DataFrame(
-            columns=["timestamp_us", "type", "side", "price", "qty",
-                      "update_id", "seq"]
+            columns=["timestamp_us", "type", "side", "price", "qty", "update_id", "seq"]
         )
 
     for f in files:
@@ -369,4 +176,163 @@ def load_directory(
         df = df.sort_values("timestamp_us").reset_index(drop=True)
 
     logger.info("Loaded %d total rows from %d files", len(df), len(files))
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Direct snapshots loading (skips expand→reconstruct round-trip)
+# ---------------------------------------------------------------------------
+
+
+def _detect_levels(columns: list[str]) -> tuple[list[str], list[str]]:
+    """Detect ask and bid price columns from CSV headers."""
+    ask_cols = sorted(
+        [c for c in columns if c.startswith("asks[") and c.endswith("].price")],
+        key=lambda c: int(c.split("[")[1].split("]")[0]),
+    )
+    bid_cols = sorted(
+        [c for c in columns if c.startswith("bids[") and c.endswith("].price")],
+        key=lambda c: int(c.split("[")[1].split("]")[0]),
+    )
+    return ask_cols, bid_cols
+
+
+def load_snapshots(
+    path: Path | str,
+    n_levels: int = 10,
+    sample_interval_us: int = DEFAULT_SAMPLE_INTERVAL_US,
+    max_rows: int | None = None,
+) -> pd.DataFrame:
+    """Load Tardis book_snapshot CSV directly into snapshots DataFrame format.
+
+    Converts directly to the schema used by the features pipeline, without
+    the intermediate expand→reconstruct step. Much faster for large files.
+
+    Args:
+        path: Path to the Tardis CSV (.csv.gz or .csv).
+        n_levels: Number of book levels per side in output (default 10).
+        sample_interval_us: Keep one snapshot per this many microseconds
+            (default 1_000_000 = 1s). Set to 0 to keep all rows.
+        max_rows: If set, only read this many CSV rows before subsampling.
+
+    Returns:
+        DataFrame with columns:
+            timestamp: int64 (microseconds since epoch)
+            mid_price: float64
+            spread: float64
+            bid_price_1..N, bid_qty_1..N: float64
+            ask_price_1..N, ask_qty_1..N: float64
+    """
+    path = Path(path)
+
+    read_kwargs = {}
+    if max_rows is not None:
+        read_kwargs["nrows"] = max_rows
+
+    logger.info("Reading %s ...", path.name)
+    df = pd.read_csv(path, **read_kwargs)
+
+    if df.empty:
+        return pd.DataFrame()
+
+    # Timestamps
+    ts_col = "timestamp" if "timestamp" in df.columns else df.columns[0]
+    timestamps = df[ts_col].values.astype(np.int64)
+    if timestamps.max() < 1e15:
+        timestamps = timestamps * 1000
+
+    # Subsample: keep one row per interval
+    if sample_interval_us > 0 and len(timestamps) > 1:
+        keep = np.zeros(len(timestamps), dtype=bool)
+        keep[0] = True
+        last_kept = timestamps[0]
+        for i in range(1, len(timestamps)):
+            if timestamps[i] - last_kept >= sample_interval_us:
+                keep[i] = True
+                last_kept = timestamps[i]
+        df = df.loc[keep].reset_index(drop=True)
+        timestamps = timestamps[keep]
+        logger.info(
+            "Subsampled to %d snapshots (interval=%d μs)",
+            len(df),
+            sample_interval_us,
+        )
+
+    # Detect available levels
+    ask_price_cols, bid_price_cols = _detect_levels(df.columns.tolist())
+    n_avail_ask = len(ask_price_cols)
+    n_avail_bid = len(bid_price_cols)
+    n_out = min(n_levels, n_avail_ask, n_avail_bid)
+
+    # Build output DataFrame
+    result = pd.DataFrame({"timestamp": timestamps})
+
+    # Extract price/qty arrays for top N levels
+    for i in range(n_out):
+        ask_p = df[f"asks[{i}].price"].values.astype(np.float64)
+        ask_q = df[f"asks[{i}].amount"].values.astype(np.float64)
+        bid_p = df[f"bids[{i}].price"].values.astype(np.float64)
+        bid_q = df[f"bids[{i}].amount"].values.astype(np.float64)
+
+        result[f"ask_price_{i + 1}"] = ask_p
+        result[f"ask_qty_{i + 1}"] = ask_q
+        result[f"bid_price_{i + 1}"] = bid_p
+        result[f"bid_qty_{i + 1}"] = bid_q
+
+    # Compute mid_price and spread from best bid/ask
+    result["mid_price"] = (result["bid_price_1"] + result["ask_price_1"]) / 2.0
+    result["spread"] = result["ask_price_1"] - result["bid_price_1"]
+
+    logger.info(
+        "Loaded %d snapshots from %s (%d levels/side, ts range %.1fs)",
+        len(result),
+        path.name,
+        n_out,
+        (timestamps[-1] - timestamps[0]) / 1e6 if len(timestamps) > 1 else 0,
+    )
+    return result
+
+
+def load_snapshots_directory(
+    directory: Path | str,
+    symbol: str | None = None,
+    n_levels: int = 10,
+    sample_interval_us: int = DEFAULT_SAMPLE_INTERVAL_US,
+    **kwargs,
+) -> pd.DataFrame:
+    """Load all Tardis CSV files from a directory into a single snapshots DataFrame.
+
+    Args:
+        directory: Path to directory containing CSV files.
+        symbol: If set, only load files matching this symbol.
+        n_levels: Number of book levels per side.
+        sample_interval_us: Subsampling interval in microseconds.
+        **kwargs: Passed to load_snapshots().
+
+    Returns:
+        Concatenated snapshots DataFrame sorted by timestamp.
+    """
+    directory = Path(directory)
+    files = []
+    for pattern in ["*.csv.gz", "*.csv"]:
+        files.extend(directory.glob(pattern))
+
+    if symbol:
+        files = [f for f in files if symbol.upper() in f.name.upper()]
+
+    files = sorted(set(files))
+
+    if not files:
+        logger.warning("No data files found in %s", directory)
+        return pd.DataFrame()
+
+    frames = []
+    for f in files:
+        frames.append(
+            load_snapshots(f, n_levels=n_levels, sample_interval_us=sample_interval_us, **kwargs)
+        )
+
+    df = pd.concat(frames, ignore_index=True)
+    df = df.sort_values("timestamp").reset_index(drop=True)
+    logger.info("Loaded %d total snapshots from %d files", len(df), len(files))
     return df
