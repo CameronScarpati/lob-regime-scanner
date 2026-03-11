@@ -16,6 +16,7 @@ from dashboard._constants import (
     PLOTLY_LAYOUT_DEFAULTS,
     REGIME_COLORS,
     REGIME_NAMES,
+    XAXIS_STYLE,
 )
 
 
@@ -226,7 +227,7 @@ def create_heatmap_figure(
     )
     fig.update_xaxes(
         title_text="", row=2, col=1,
-        **AXIS_STYLE,
+        **XAXIS_STYLE,
     )
 
     fig.update_layout(
