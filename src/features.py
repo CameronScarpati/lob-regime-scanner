@@ -106,6 +106,24 @@ def compute_vpin(
     else:
         volumes = (df["bid_qty_1"] + df["ask_qty_1"]).values.astype(float) / 2.0
 
+    # Clean NaN/inf — flowrisk cannot handle them
+    prices = pd.Series(prices).ffill().bfill().values.astype(float)
+    volumes = np.nan_to_num(volumes, nan=0.0, posinf=0.0, neginf=0.0)
+    volumes = np.clip(volumes, 0.0, None)
+
+    if np.sum(np.isfinite(prices)) < 10:
+        logger.warning("Too few valid prices for VPIN")
+        return pd.Series(np.nan, index=df.index, name="vpin")
+
+    # Break identical consecutive prices with sub-tick noise to avoid
+    # NaN in flowrisk's PnL volatility estimate (division by zero when
+    # consecutive prices are equal from forward-fill resampling).
+    tick = np.median(np.abs(np.diff(prices[prices > 0])))
+    if tick == 0 or not np.isfinite(tick):
+        tick = 0.01
+    noise_scale = tick * 1e-6  # negligible relative to price
+    prices = prices + np.random.default_rng(42).normal(0, noise_scale, len(prices))
+
     if bucket_volume is None:
         total_vol = np.nansum(volumes)
         bucket_volume = max(total_vol / 50.0, 1.0)
@@ -128,7 +146,16 @@ def compute_vpin(
     estimator = BulkVPIN(cfg)
     vpin_df = estimator.estimate(time_bars)
 
-    vpin_series = pd.Series(vpin_df["vpin"].values, index=df.index, name="vpin")
+    # flowrisk may return fewer rows than input; align to original index
+    vpin_vals = vpin_df["vpin"].values
+    if len(vpin_vals) < len(df):
+        padded = np.full(len(df), np.nan)
+        padded[: len(vpin_vals)] = vpin_vals
+        vpin_vals = padded
+    elif len(vpin_vals) > len(df):
+        vpin_vals = vpin_vals[: len(df)]
+
+    vpin_series = pd.Series(vpin_vals, index=df.index, name="vpin")
     return vpin_series
 
 

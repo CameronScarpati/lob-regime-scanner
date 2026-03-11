@@ -17,11 +17,18 @@ from dashboard._constants import REGIME_COLORS, REGIME_NAMES
 def _build_volume_matrix(
     snapshots: pd.DataFrame,
     n_levels: int = 10,
+    max_time_steps: int = 2000,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build a 2-D volume matrix (price_levels x time) from snapshot data.
 
     Returns (price_axis, time_axis, volume_matrix).
+    Subsamples to *max_time_steps* if the data is larger.
     """
+    # Subsample for performance
+    if len(snapshots) > max_time_steps:
+        step = len(snapshots) // max_time_steps
+        snapshots = snapshots.iloc[::step].reset_index(drop=True)
+
     n_t = len(snapshots)
 
     bid_prices = np.column_stack(
@@ -135,7 +142,12 @@ def create_heatmap_figure(
 
     # --- Large trade markers ---
     trade_sizes = snapshots["last_trade_qty"].values
-    large_mask = trade_sizes > np.percentile(trade_sizes, 90)
+    finite_sizes = trade_sizes[np.isfinite(trade_sizes)]
+    if len(finite_sizes) > 0:
+        threshold = np.percentile(finite_sizes, 90)
+        large_mask = trade_sizes > threshold
+    else:
+        large_mask = np.zeros(len(trade_sizes), dtype=bool)
     if large_mask.any():
         colors = [
             "#2ecc71" if s == "buy" else "#e74c3c"
