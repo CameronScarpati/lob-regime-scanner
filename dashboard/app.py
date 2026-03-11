@@ -36,28 +36,23 @@ logger = logging.getLogger(__name__)
 
 def _build_time_options(
     timestamps: pd.Series,
-    max_options: int = 80,
 ) -> list[dict[str, str]]:
-    """Build Select options by sampling timestamps at even intervals.
+    """Build Select options from all available timestamps.
 
-    Always includes the first and last timestamp.  The number of
-    options is capped at *max_options* to keep the dropdown usable.
+    The pipeline already caps data at ~3600 points, so showing every
+    timestamp keeps the searchable dropdown usable while giving
+    precise time-window control.
     """
     n = len(timestamps)
     if n == 0:
         return []
-
-    step = max(1, n // max_options)
-    indices = list(range(0, n, step))
-    if indices[-1] != n - 1:
-        indices.append(n - 1)
 
     ts_start = pd.Timestamp(timestamps.iloc[0])
     ts_end = pd.Timestamp(timestamps.iloc[-1])
     same_day = ts_start.date() == ts_end.date()
 
     options: list[dict[str, str]] = []
-    for idx in indices:
+    for idx in range(n):
         ts = pd.Timestamp(timestamps.iloc[idx])
         if same_day:
             label = ts.strftime("%-H:%M:%S")
