@@ -1,4 +1,4 @@
-/* LOB Regime Scanner Dashboard — Dark Theme */
+/* LOB Regime Scanner Dashboard — Premium Dark Theme */
 
 /* ── Reset & base ── */
 * {
@@ -8,19 +8,21 @@
 }
 
 body {
-    background-color: #0d1117;
-    color: #c9d1d9;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+    background-color: #0a0e14;
+    color: #d4d8df;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
         sans-serif;
     font-size: 14px;
     line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 /* ── App container ── */
 #app-container {
-    max-width: 1600px;
+    max-width: 1800px;
     margin: 0 auto;
-    padding: 12px 20px;
+    padding: 10px 16px;
 }
 
 /* ── Header ── */
@@ -28,25 +30,27 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 20px;
-    margin-bottom: 12px;
-    background: linear-gradient(135deg, #161b22 0%, #1a2332 100%);
-    border: 1px solid #30363d;
-    border-radius: 8px;
+    padding: 10px 24px;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #0f1923 0%, #131d2a 50%, #0f1923 100%);
+    border: 1px solid rgba(88, 166, 255, 0.12);
+    border-radius: 6px;
 }
 
 .dashboard-header h1 {
-    font-size: 22px;
-    font-weight: 600;
-    color: #f0f6fc;
-    letter-spacing: 0.5px;
+    font-size: 20px;
+    font-weight: 700;
+    color: #e8edf3;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 .header-meta {
     display: flex;
-    gap: 24px;
-    font-size: 13px;
-    color: #8b949e;
+    gap: 28px;
+    font-size: 12px;
+    color: #6e7681;
 }
 
 .header-meta span {
@@ -56,8 +60,11 @@ body {
 }
 
 .header-meta .label {
-    color: #58a6ff;
-    font-weight: 500;
+    color: #4d8fcc;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.8px;
 }
 
 /* ── Controls bar ── */
@@ -65,11 +72,11 @@ body {
     display: flex;
     align-items: center;
     gap: 16px;
-    padding: 10px 20px;
-    margin-bottom: 12px;
-    background-color: #161b22;
-    border: 1px solid #30363d;
-    border-radius: 8px;
+    padding: 8px 20px;
+    margin-bottom: 8px;
+    background-color: #0f1923;
+    border: 1px solid rgba(88, 166, 255, 0.08);
+    border-radius: 6px;
 }
 
 .controls-bar .slider-container {
@@ -77,9 +84,12 @@ body {
 }
 
 .controls-bar .slider-label {
-    font-size: 12px;
-    color: #8b949e;
-    margin-bottom: 4px;
+    font-size: 10px;
+    color: #6e7681;
+    margin-bottom: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 600;
 }
 
 /* ── Regime filter buttons ── */
@@ -90,87 +100,95 @@ body {
 }
 
 .regime-filters .filter-label {
-    font-size: 12px;
-    color: #8b949e;
+    font-size: 10px;
+    color: #6e7681;
     margin-right: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 600;
 }
 
 .regime-btn {
-    padding: 5px 14px;
-    border: 2px solid;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 600;
+    padding: 4px 14px;
+    border: 1.5px solid;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease;
     background: transparent;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.8px;
 }
 
 .regime-btn-quiet {
-    color: #2ecc71;
-    border-color: #2ecc71;
+    color: #00c853;
+    border-color: rgba(0, 200, 83, 0.5);
 }
 
 .regime-btn-trending {
-    color: #3498db;
-    border-color: #3498db;
+    color: #448aff;
+    border-color: rgba(68, 138, 255, 0.5);
 }
 
 .regime-btn-toxic {
-    color: #e74c3c;
-    border-color: #e74c3c;
+    color: #ff5252;
+    border-color: rgba(255, 82, 82, 0.5);
 }
 
 .regime-btn:hover {
-    opacity: 0.85;
-    transform: scale(1.03);
+    opacity: 0.9;
+    transform: scale(1.02);
 }
 
 .regime-btn.inactive {
-    opacity: 0.3;
+    opacity: 0.25;
     background: transparent;
 }
 
-/* ── 2×2 Panel grid ── */
+/* ── 2x2 Panel grid ── */
 .panel-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     grid-template-rows: auto auto;
-    gap: 12px;
+    gap: 8px;
 }
 
 .panel {
-    background-color: #161b22;
-    border: 1px solid #30363d;
-    border-radius: 8px;
-    padding: 8px;
+    background-color: #0f1318;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 6px;
+    padding: 4px;
     overflow: hidden;
 }
 
 .panel:hover {
-    border-color: #58a6ff;
-    transition: border-color 0.3s ease;
+    border-color: rgba(88, 166, 255, 0.2);
+    transition: border-color 0.25s ease;
 }
 
 /* ── Dash component overrides ── */
 .dash-graph .modebar {
-    top: 4px !important;
-    right: 4px !important;
+    top: 2px !important;
+    right: 2px !important;
+    opacity: 0.4;
+}
+
+.dash-graph .modebar:hover {
+    opacity: 0.9;
 }
 
 .rc-slider-track {
-    background-color: #58a6ff !important;
+    background-color: #448aff !important;
 }
 
 .rc-slider-handle {
-    border-color: #58a6ff !important;
-    background-color: #161b22 !important;
+    border-color: #448aff !important;
+    background-color: #0f1923 !important;
 }
 
 .rc-slider-rail {
-    background-color: #30363d !important;
+    background-color: #1e2a38 !important;
 }
 
 /* ── Range slider dark style ── */
@@ -180,21 +198,21 @@ body {
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-    background: #0d1117;
+    background: #0a0e14;
 }
 
 ::-webkit-scrollbar-thumb {
-    background: #30363d;
-    border-radius: 4px;
+    background: #1e2a38;
+    border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: #484f58;
+    background: #2d3f52;
 }
 
 /* ── Responsive ── */
