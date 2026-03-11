@@ -1,14 +1,15 @@
-"""Bybit historical L2 order book data downloader.
+"""Historical L2 order book data downloader.
 
-Downloads compressed data files from Bybit's public data servers
-for a given symbol and date range. Supports both linear perpetual
-contracts and spot markets.
-
-Data source: https://quote-saver.bycsi.com/orderbook/linear/{symbol}/
-File format: ZIP archives containing line-delimited JSON with
-snapshot and delta order book updates (200 levels).
+Supports multiple data sources:
+  1. Bybit (primary): Downloads from quote-saver.bycsi.com and
+     public.bybit.com. Note: Bybit orderbook archives are only
+     available for recent dates (roughly May 2025 onward).
+  2. Tardis.dev: Professional-grade tick-level data for 40+ crypto
+     exchanges. Free sample data (1st of each month) without API key.
+     Full access requires a paid API key from https://tardis.dev.
 """
 
+import asyncio
 import gzip
 import io
 import logging
@@ -23,23 +24,15 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_RAW_DIR = Path(__file__).parent / "raw"
 
+# ---------------------------------------------------------------------------
+# Bybit URLs
+# ---------------------------------------------------------------------------
 BASE_URL = "https://quote-saver.bycsi.com/orderbook"
-
-# Bybit changed data hosting over time; fall back if needed
 LEGACY_BASE_URL = "https://public.bybit.com/orderbook"
 
 
 def _build_url(symbol: str, dt: date, market: str = "linear") -> str:
-    """Build the download URL for a given symbol and date.
-
-    Args:
-        symbol: Trading pair (e.g. 'BTCUSDT').
-        dt: Date to download.
-        market: Market type ('linear', 'inverse', 'spot').
-
-    Returns:
-        Full URL to the data file.
-    """
+    """Build the primary Bybit download URL."""
     date_str = dt.strftime("%Y-%m-%d")
     filename = f"{date_str}_{symbol}_ob200.data.zip"
     return f"{BASE_URL}/{market}/{symbol}/{filename}"
@@ -58,7 +51,7 @@ def download_day(
     market: str = "linear",
     timeout: int = 120,
 ) -> Path | None:
-    """Download order book data for a single day.
+    """Download Bybit order book data for a single day.
 
     Attempts the primary URL first, then falls back to legacy format.
 
@@ -113,11 +106,7 @@ def download_day(
 
 
 def _save_zip_as_jsonl_gz(zip_bytes: bytes, out_path: Path) -> Path:
-    """Extract JSON lines from a ZIP archive and save as gzipped JSONL.
-
-    Bybit packages orderbook data as a ZIP containing one or more data
-    files with line-delimited JSON records.
-    """
+    """Extract JSON lines from a ZIP archive and save as gzipped JSONL."""
     buf = io.BytesIO(zip_bytes)
     with zipfile.ZipFile(buf) as zf:
         lines = []
@@ -138,6 +127,162 @@ def _save_zip_as_jsonl_gz(zip_bytes: bytes, out_path: Path) -> Path:
     return out_path
 
 
+# ---------------------------------------------------------------------------
+# Tardis.dev downloader
+# ---------------------------------------------------------------------------
+
+# Map common symbol names to Tardis exchange identifiers.
+# Tardis uses exchange-specific naming; Bybit linear perps use the
+# same symbol format as the user would pass (e.g. "BTCUSDT").
+TARDIS_EXCHANGE_MAP = {
+    "bybit": "bybit",
+    "binance": "binance-futures",
+    "binance-spot": "binance",
+    "okx": "okex-swap",
+    "deribit": "deribit",
+}
+
+
+def _tardis_download_sync(
+    exchange: str,
+    data_types: list[str],
+    symbols: list[str],
+    from_date: str,
+    to_date: str,
+    download_dir: str,
+    api_key: str = "",
+) -> None:
+    """Synchronous wrapper around the async tardis-dev download."""
+    from tardis_dev import datasets
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(
+            datasets.download(
+                exchange=exchange,
+                data_types=data_types,
+                symbols=symbols,
+                from_date=from_date,
+                to_date=to_date,
+                download_dir=download_dir,
+                api_key=api_key,
+            )
+        )
+    finally:
+        loop.close()
+
+
+def download_tardis(
+    symbol: str,
+    start: date | str,
+    end: date | str,
+    output_dir: Path | None = None,
+    exchange: str = "bybit",
+    data_type: str = "book_snapshot_25",
+    api_key: str = "",
+) -> list[Path]:
+    """Download order book data via Tardis.dev.
+
+    Tardis.dev provides pre-reconstructed L2 order book snapshots as
+    compressed CSV files. Free sample data (1st of each month) is
+    available without an API key.
+
+    Args:
+        symbol: Trading pair (e.g. 'BTCUSDT').
+        start: Start date (inclusive).
+        end: End date (inclusive).
+        output_dir: Directory to save files. Defaults to data/raw/.
+        exchange: Exchange name (bybit, binance, okx, deribit).
+        data_type: Tardis data type. Recommended:
+            'book_snapshot_25' — top 25 levels per side, snapshot on every change
+            'book_snapshot_5'  — top 5 levels (smaller files)
+            'incremental_book_L2' — raw incremental updates
+        api_key: Tardis API key. Empty string uses free sample data
+            (only 1st of each month available).
+
+    Returns:
+        List of paths to downloaded CSV files.
+    """
+    try:
+        from tardis_dev import datasets  # noqa: F401
+    except ImportError:
+        raise ImportError(
+            "tardis-dev is required for Tardis downloads. Install with:\n"
+            "  pip install tardis-dev"
+        )
+
+    if isinstance(start, str):
+        start = datetime.strptime(start, "%Y-%m-%d").date()
+    if isinstance(end, str):
+        end = datetime.strptime(end, "%Y-%m-%d").date()
+
+    if end < start:
+        raise ValueError(f"end ({end}) must be >= start ({start})")
+
+    if output_dir is None:
+        output_dir = DEFAULT_RAW_DIR
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    tardis_exchange = TARDIS_EXCHANGE_MAP.get(exchange, exchange)
+
+    from_str = start.strftime("%Y-%m-%d")
+    # Tardis to_date is exclusive, so add 1 day
+    to_str = (end + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    logger.info(
+        "Downloading %s %s from Tardis.dev (%s, %s to %s) ...",
+        tardis_exchange,
+        symbol,
+        data_type,
+        from_str,
+        end.strftime("%Y-%m-%d"),
+    )
+    if not api_key:
+        logger.info(
+            "No API key provided — only free sample data (1st of each month) "
+            "will be available. Get an API key at https://tardis.dev"
+        )
+
+    # Tardis downloads files into a specific directory structure
+    download_dir = str(output_dir / "tardis_cache")
+
+    _tardis_download_sync(
+        exchange=tardis_exchange,
+        data_types=[data_type],
+        symbols=[symbol],
+        from_date=from_str,
+        to_date=to_str,
+        download_dir=download_dir,
+        api_key=api_key,
+    )
+
+    # Collect downloaded files and copy/link to output_dir with standard naming
+    cache_dir = Path(download_dir)
+    downloaded = sorted(cache_dir.rglob("*.csv.gz"))
+    paths = []
+
+    for src in downloaded:
+        # Tardis names files like: bybit_book_snapshot_25_2024-01-01_BTCUSDT.csv.gz
+        dest = output_dir / src.name
+        if not dest.exists():
+            import shutil
+            shutil.copy2(src, dest)
+        paths.append(dest)
+        logger.info("Saved: %s", dest.name)
+
+    logger.info(
+        "Downloaded %d file(s) for %s via Tardis.dev",
+        len(paths),
+        symbol,
+    )
+    return paths
+
+
+# ---------------------------------------------------------------------------
+# Bybit range downloader
+# ---------------------------------------------------------------------------
+
 def download_range(
     symbol: str,
     start: date | str,
@@ -145,7 +290,7 @@ def download_range(
     output_dir: Path | None = None,
     market: str = "linear",
 ) -> list[Path]:
-    """Download order book data for a date range.
+    """Download Bybit order book data for a date range.
 
     Args:
         symbol: Trading pair (e.g. 'BTCUSDT').
@@ -182,6 +327,10 @@ def download_range(
     return paths
 
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 if __name__ == "__main__":
     import argparse
 
@@ -190,15 +339,70 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    parser = argparse.ArgumentParser(description="Download Bybit L2 orderbook data")
+    parser = argparse.ArgumentParser(
+        description="Download L2 orderbook data",
+        epilog=(
+            "Examples:\n"
+            "  # Tardis.dev free sample (1st of each month, no key needed):\n"
+            "  python data/download.py --source tardis --symbol BTCUSDT "
+            "--start 2024-01-01 --end 2024-01-01\n\n"
+            "  # Tardis.dev with API key (any date):\n"
+            "  python data/download.py --source tardis --symbol BTCUSDT "
+            "--start 2024-06-15 --end 2024-06-21 "
+            "--tardis-api-key YOUR_KEY\n\n"
+            "  # Bybit direct (recent dates only, ~May 2025+):\n"
+            "  python data/download.py --source bybit --symbol BTCUSDT "
+            "--start 2025-06-01 --end 2025-06-07\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--source",
+        default="tardis",
+        choices=["tardis", "bybit"],
+        help="Data source (default: tardis)",
+    )
     parser.add_argument("--symbol", default="BTCUSDT", help="Trading pair")
     parser.add_argument("--start", required=True, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", required=True, help="End date (YYYY-MM-DD)")
     parser.add_argument("--output-dir", default=None, help="Output directory")
+
+    # Bybit-specific options
     parser.add_argument(
-        "--market", default="linear", choices=["linear", "inverse", "spot"]
+        "--market", default="linear", choices=["linear", "inverse", "spot"],
+        help="Bybit market type (default: linear)",
+    )
+
+    # Tardis-specific options
+    parser.add_argument(
+        "--exchange", default="bybit",
+        help="Exchange for Tardis source (default: bybit)",
+    )
+    parser.add_argument(
+        "--data-type",
+        default="book_snapshot_25",
+        choices=["book_snapshot_25", "book_snapshot_5", "incremental_book_L2"],
+        help="Tardis data type (default: book_snapshot_25)",
+    )
+    parser.add_argument(
+        "--tardis-api-key",
+        default="",
+        help="Tardis.dev API key (omit for free sample data: 1st of each month)",
     )
 
     args = parser.parse_args()
     output_dir = Path(args.output_dir) if args.output_dir else None
-    download_range(args.symbol, args.start, args.end, output_dir, args.market)
+
+    if args.source == "tardis":
+        api_key = args.tardis_api_key or os.environ.get("TARDIS_API_KEY", "")
+        download_tardis(
+            args.symbol,
+            args.start,
+            args.end,
+            output_dir,
+            exchange=args.exchange,
+            data_type=args.data_type,
+            api_key=api_key,
+        )
+    else:
+        download_range(args.symbol, args.start, args.end, output_dir, args.market)
