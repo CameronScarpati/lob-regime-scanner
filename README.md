@@ -35,34 +35,38 @@ make test
 # Launch the dashboard (demo mode with synthetic data)
 python -m dashboard.app --demo
 
-# Launch with real Bybit data
-python -m dashboard.app --symbol BTCUSDT --start 2025-01-15 --end 2025-01-16
+# Download free sample data, then launch with real data
+python data/download.py --source tardis --symbol BTCUSDT --start 2024-01-01 --end 2024-01-01
+python -m dashboard.app --symbol BTCUSDT --start 2024-01-01 --end 2024-01-01
 ```
 
 ### Downloading Data
 
 The downloader supports two data sources:
 
-**Tardis.dev (default)** — Professional-grade tick-level data for 40+ crypto exchanges. Free sample data (1st of each month) requires no API key. Full historical access needs a paid key from [tardis.dev](https://tardis.dev).
+**Tardis.dev (default)** — Professional-grade tick-level data for 40+ crypto exchanges. Uses direct HTTP download (no SDK installation required). Free sample data for the **1st of each month** is available without an API key. Full historical access needs a paid key from [tardis.dev](https://tardis.dev).
 
 ```bash
-# Download via Tardis.dev (free sample: 1st of any month, no key needed)
-python data/download.py --source tardis --symbol BTCUSDT --start 2025-01-01 --end 2025-01-02
+# Free sample data: 1st of any month, no API key needed
+python data/download.py --source tardis --symbol BTCUSDT --start 2024-01-01 --end 2024-01-01
 
-# Download with full Tardis API access
-python data/download.py --source tardis --symbol BTCUSDT --start 2025-01-15 --end 2025-01-21 \
+# Multiple free months at once (downloads 1st of Jan, Feb, Mar)
+python data/download.py --source tardis --symbol BTCUSDT --start 2024-01-01 --end 2024-03-01
+
+# Full Tardis API access (any date, requires paid key)
+python data/download.py --source tardis --symbol BTCUSDT --start 2024-06-15 --end 2024-06-21 \
   --tardis-api-key YOUR_KEY
-# Or set the TARDIS_API_KEY environment variable
+# Or: export TARDIS_API_KEY=YOUR_KEY
 
-# Download from a different exchange (e.g. Binance)
+# Different exchange (e.g. Binance Futures)
 python data/download.py --source tardis --exchange binance --symbol BTCUSDT \
-  --start 2025-01-01 --end 2025-01-02
+  --start 2024-01-01 --end 2024-01-01
 ```
 
-**Bybit** — Direct download from Bybit's public archives. Note: archives are only available for recent dates (~May 2025 onward).
+**Bybit** — Direct download from Bybit's `quote-saver.bycsi.com` orderbook archives (ZIP/JSONL at 10ms granularity). No API key needed, but archives are only available for recent dates (~May 2025 onward).
 
 ```bash
-# Download Bybit L2 order book data (no API key needed)
+# Download Bybit L2 order book data
 python data/download.py --source bybit --symbol BTCUSDT --start 2025-06-01 --end 2025-06-07
 ```
 
@@ -75,10 +79,10 @@ python data/download.py --source bybit --symbol BTCUSDT --start 2025-06-01 --end
 │  Data Layer   │  Feature Eng  │  HMM Engine   │  Dashboard       │
 │               │               │               │                  │
 │ Tardis.dev    │ OFI (multi-   │ Gaussian HMM  │ Bookmap-style    │
-│ (40+ crypto   │   level)      │ (3 states)    │ LOB heatmap      │
-│  exchanges)   │ VPIN          │               │                  │
-│ Bybit L2      │ Spread stats  │ Viterbi path  │ Regime overlay   │
-│ historical    │ Book imbal.   │ decoding      │ bands            │
+│ (direct HTTP, │   level)      │ (3 states)    │ LOB heatmap      │
+│  40+ exchanges│ VPIN          │               │                  │
+│  free 1st/mo) │ Spread stats  │ Viterbi path  │ Regime overlay   │
+│ Bybit L2      │ Book imbal.   │ decoding      │ bands            │
 │               │ Trade flow    │               │                  │
 │ C++ LOB       │ aggression    │ Forward-       │ 3D depth         │
 │ reconstruc-   │ Kyle's λ      │ backward      │ surface          │
