@@ -17,6 +17,7 @@ import os
 import sys
 
 import dash_mantine_components as dmc
+import numpy as np
 from dash import Dash, dcc
 
 from dashboard._constants import PANEL_DESCRIPTIONS, REGIME_COLORS
@@ -192,6 +193,16 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
     else:
         date_label = "Full range"
 
+    # Prepare time-range slider marks
+    timestamps = feat["timestamp"]
+    n_points = len(timestamps)
+    n_marks = 6
+    mark_indices = np.linspace(0, n_points - 1, n_marks, dtype=int)
+    slider_marks = [
+        {"value": int(idx), "label": str(timestamps.iloc[idx].strftime("%H:%M:%S"))}
+        for idx in mark_indices
+    ]
+
     # Build app
     dash_app = Dash(
         __name__,
@@ -308,9 +319,39 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                             p="xs",
                             px="lg",
                             children=dmc.Group(
-                                justify="flex-end",
+                                justify="space-between",
                                 children=[
-                                    # Regime filter chips
+                                    # Time range selector (left)
+                                    dmc.Group(
+                                        gap="sm",
+                                        style={"flex": "1", "maxWidth": "600px"},
+                                        children=[
+                                            dmc.Text(
+                                                "Time Range",
+                                                size="xs",
+                                                fw=600,
+                                                c="dimmed",
+                                                tt="uppercase",
+                                                style={
+                                                    "letterSpacing": "0.08em",
+                                                    "whiteSpace": "nowrap",
+                                                },
+                                            ),
+                                            dmc.RangeSlider(
+                                                id="time-range-slider",
+                                                min=0,
+                                                max=n_points - 1,
+                                                value=[0, n_points - 1],
+                                                marks=slider_marks,
+                                                step=1,
+                                                minRange=10,
+                                                color="blue",
+                                                size="sm",
+                                                style={"flex": "1", "minWidth": "300px"},
+                                            ),
+                                        ],
+                                    ),
+                                    # Regime filter chips (right)
                                     dmc.Group(
                                         gap="sm",
                                         children=[
