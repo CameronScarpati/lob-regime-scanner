@@ -19,9 +19,10 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# Default: keep one snapshot per 100ms — fast enough for microstructure
-# signals (OFI, spread dynamics) while keeping data tractable (~864k/day).
-DEFAULT_SAMPLE_INTERVAL_US = 100_000
+# Default: keep one snapshot per 1s — gives ZSCORE_WINDOW=300 a meaningful
+# 5-minute rolling window for microstructure signals (OFI, spread dynamics)
+# while keeping data tractable (~86k/day).
+DEFAULT_SAMPLE_INTERVAL_US = 1_000_000
 
 
 def load(path: Path | str, max_rows: int | None = None) -> pd.DataFrame:
