@@ -33,34 +33,31 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _build_slider_marks(
+def _build_time_options(
     timestamps: pd.Series,
-    n_marks: int = 6,
-) -> dict[int, str]:
-    """Create evenly-spaced slider marks with human-readable time labels.
+) -> tuple[list[dict[str, str]], bool]:
+    """Build dropdown options from snapshot timestamps.
 
-    If all timestamps fall on the same date, marks show only the time
-    (e.g. "09:15"). When the range spans multiple days the date is
-    included (e.g. "Jan 15 09:15").
+    Returns (options_list, same_day) where each option has
+    ``{"label": "9:16:07", "value": "0"}`` keyed by integer index.
     """
     n = len(timestamps)
     if n == 0:
-        return {}
-
-    indices = [int(i * (n - 1) / (n_marks - 1)) for i in range(n_marks)]
+        return [], True
 
     ts_start = pd.Timestamp(timestamps.iloc[0])
     ts_end = pd.Timestamp(timestamps.iloc[-1])
     same_day = ts_start.date() == ts_end.date()
 
-    marks: dict[int, str] = {}
-    for idx in indices:
-        ts = pd.Timestamp(timestamps.iloc[idx])
+    options: list[dict[str, str]] = []
+    for i in range(n):
+        ts = pd.Timestamp(timestamps.iloc[i])
         if same_day:
-            marks[idx] = ts.strftime("%-H:%M")
+            label = ts.strftime("%-H:%M:%S")
         else:
-            marks[idx] = ts.strftime("%b %-d %H:%M")
-    return marks
+            label = ts.strftime("%b %-d %H:%M:%S")
+        options.append({"label": label, "value": str(i)})
+    return options, same_day
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +168,9 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
     init_depth = create_depth_surface_figure(snap, hmm["states"])
     init_diag = create_diagnostics_figure(feat, hmm["states"], pnl)
 
+    # Build time picker options
+    time_options, _same_day = _build_time_options(snap["timestamp"])
+
     # Determine data source label
     if args.demo:
         source_label = "Mock / Synthetic Data"
@@ -230,27 +230,32 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                 className="controls-bar",
                 children=[
                     html.Div(
-                        className="slider-container",
+                        className="time-picker-group",
                         children=[
+                            html.Div("Time Window", className="time-picker-label"),
                             html.Div(
-                                className="slider-label-row",
+                                className="time-picker-inputs",
                                 children=[
-                                    html.Div("Time Window", className="slider-label"),
-                                    html.Div(
-                                        id="time-window-readout",
-                                        className="slider-readout",
+                                    dcc.Dropdown(
+                                        id="time-start-dropdown",
+                                        options=time_options,
+                                        value="0",
+                                        clearable=False,
+                                        searchable=True,
+                                        className="time-dropdown",
+                                        placeholder="Start",
+                                    ),
+                                    html.Span("to", className="time-picker-sep"),
+                                    dcc.Dropdown(
+                                        id="time-end-dropdown",
+                                        options=time_options,
+                                        value=str(len(snap) - 1),
+                                        clearable=False,
+                                        searchable=True,
+                                        className="time-dropdown",
+                                        placeholder="End",
                                     ),
                                 ],
-                            ),
-                            dcc.RangeSlider(
-                                id="date-range-slider",
-                                min=0,
-                                max=len(snap) - 1,
-                                step=1,
-                                value=[0, len(snap) - 1],
-                                marks=_build_slider_marks(snap["timestamp"]),
-                                allowCross=False,
-                                allow_direct_input=False,
                             ),
                         ],
                     ),

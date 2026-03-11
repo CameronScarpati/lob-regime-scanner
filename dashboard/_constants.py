@@ -29,7 +29,7 @@ PANEL_DESCRIPTIONS = {
         "Posterior state probabilities from a 3-state Gaussian HMM "
         "fitted to order-book features (OFI, VPIN, spread, volatility). "
         "Regimes are not predefined\u2014they are learned by the model and "
-        "reordered by variance (Quiet\u2009=\u2009lowest, Toxic\u2009=\u2009highest). "
+        "reordered by variance (Quiet = lowest, Toxic = highest). "
         "The transition matrix (right) shows the estimated probability "
         "of switching between regimes in one time step."
     ),
@@ -42,7 +42,7 @@ PANEL_DESCRIPTIONS = {
         "Key microstructure indicators: VPIN (Volume-synchronised "
         "Probability of Informed Trading), OFI (Order Flow Imbalance), "
         "quoted spread, and cumulative PnL from a regime-aware strategy. "
-        "The strategy enters in the OFI direction on Quiet\u2009\u2192\u2009Trending "
+        "The strategy enters in the OFI direction on Quiet-to-Trending "
         "transitions and flattens when a Toxic regime is detected. "
         "Background shading reflects detected regimes."
     ),
