@@ -254,8 +254,9 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                 id="heatmap-panel",
                                 figure=init_heatmap,
                                 config={
-                                    "displayModeBar": True,
+                                    "displayModeBar": "hover",
                                     "scrollZoom": True,
+                                    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
                                 },
                             ),
                         ],
@@ -266,7 +267,7 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                             dcc.Graph(
                                 id="regime-probs-panel",
                                 figure=init_regime,
-                                config={"displayModeBar": True},
+                                config={"displayModeBar": "hover"},
                             ),
                         ],
                     ),
@@ -277,7 +278,7 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                 id="depth-surface-panel",
                                 figure=init_depth,
                                 config={
-                                    "displayModeBar": True,
+                                    "displayModeBar": "hover",
                                     "scrollZoom": True,
                                 },
                             ),
@@ -289,7 +290,7 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                             dcc.Graph(
                                 id="diagnostics-panel",
                                 figure=init_diag,
-                                config={"displayModeBar": True},
+                                config={"displayModeBar": "hover"},
                             ),
                         ],
                     ),

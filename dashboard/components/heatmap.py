@@ -11,7 +11,12 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from dashboard._constants import REGIME_COLORS, REGIME_NAMES
+from dashboard._constants import (
+    AXIS_STYLE,
+    PLOTLY_LAYOUT_DEFAULTS,
+    REGIME_COLORS,
+    REGIME_NAMES,
+)
 
 
 def _build_volume_matrix(
@@ -83,8 +88,8 @@ def create_heatmap_figure(
         rows=2,
         cols=1,
         shared_xaxes=True,
-        row_heights=[0.08, 0.92],
-        vertical_spacing=0.02,
+        row_heights=[0.06, 0.94],
+        vertical_spacing=0.015,
     )
 
     # --- Regime overlay band (top strip) ---
@@ -97,7 +102,7 @@ def create_heatmap_figure(
                 fill="tozeroy",
                 fillcolor=color,
                 line=dict(width=0),
-                opacity=0.7,
+                opacity=0.8,
                 name=REGIME_NAMES[regime_id],
                 showlegend=True,
                 hoverinfo="skip",
@@ -107,14 +112,34 @@ def create_heatmap_figure(
         )
 
     # --- LOB heatmap ---
+    # Custom dark-friendly colorscale: black -> deep blue -> teal -> gold -> white
+    bookmap_colorscale = [
+        [0.00, "rgba(12,16,22,1)"],
+        [0.05, "rgba(10,30,60,1)"],
+        [0.15, "rgba(13,55,110,1)"],
+        [0.30, "rgba(0,110,140,1)"],
+        [0.50, "rgba(0,168,120,1)"],
+        [0.70, "rgba(180,180,40,1)"],
+        [0.85, "rgba(255,200,50,1)"],
+        [1.00, "rgba(255,255,220,1)"],
+    ]
+
     fig.add_trace(
         go.Heatmap(
             x=time_axis,
             y=price_axis,
             z=vol_matrix,
-            colorscale="Inferno",
+            colorscale=bookmap_colorscale,
             zsmooth="best",
-            colorbar=dict(title="Volume", len=0.85, y=0.42),
+            colorbar=dict(
+                title=dict(text="Vol", font=dict(size=10, color="#6e7681")),
+                len=0.82,
+                y=0.40,
+                thickness=10,
+                tickfont=dict(size=9, color="#6e7681"),
+                bgcolor="rgba(0,0,0,0)",
+                borderwidth=0,
+            ),
             showlegend=False,
             hovertemplate=(
                 "Time: %{x}<br>Price: $%{y:,.2f}<br>Volume: %{z:.2f}"
@@ -131,7 +156,7 @@ def create_heatmap_figure(
             x=time_axis,
             y=snapshots["mid_price"].values,
             mode="lines",
-            line=dict(color="#f1c40f", width=1.5),
+            line=dict(color="rgba(255,255,255,0.65)", width=1.2, dash="dot"),
             name="Mid Price",
             showlegend=True,
             hovertemplate="Mid: $%{y:,.2f}<extra></extra>",
@@ -150,7 +175,7 @@ def create_heatmap_figure(
         large_mask = np.zeros(len(trade_sizes), dtype=bool)
     if large_mask.any():
         colors = [
-            "#2ecc71" if s == "buy" else "#e74c3c"
+            "#00c853" if s == "buy" else "#ff5252"
             for s in snapshots.loc[large_mask, "last_trade_side"]
         ]
         fig.add_trace(
@@ -159,10 +184,11 @@ def create_heatmap_figure(
                 y=snapshots.loc[large_mask, "last_trade_price"].values,
                 mode="markers",
                 marker=dict(
-                    size=np.clip(trade_sizes[large_mask] * 5, 3, 12),
+                    size=np.clip(trade_sizes[large_mask] * 5, 3, 10),
                     color=colors,
-                    opacity=0.7,
-                    line=dict(width=0.5, color="white"),
+                    opacity=0.8,
+                    line=dict(width=0.5, color="rgba(255,255,255,0.3)"),
+                    symbol="diamond",
                 ),
                 name="Large Trades",
                 showlegend=True,
@@ -175,17 +201,43 @@ def create_heatmap_figure(
             col=1,
         )
 
-    fig.update_yaxes(title_text="Regime", row=1, col=1, showticklabels=False)
-    fig.update_yaxes(title_text="Price (USD)", row=2, col=1)
-    fig.update_xaxes(title_text="Time", row=2, col=1)
+    fig.update_yaxes(
+        row=1, col=1,
+        showticklabels=False,
+        showgrid=False,
+        zeroline=False,
+    )
+    fig.update_yaxes(
+        title_text="Price (USD)", row=2, col=1,
+        **AXIS_STYLE,
+    )
+    fig.update_xaxes(
+        row=1, col=1,
+        showticklabels=False,
+        showgrid=False,
+    )
+    fig.update_xaxes(
+        title_text="", row=2, col=1,
+        **AXIS_STYLE,
+    )
 
     fig.update_layout(
-        title="Order Book Heatmap with Regime Overlay",
-        template="plotly_dark",
-        height=520,
-        margin=dict(l=60, r=20, t=40, b=40),
+        **PLOTLY_LAYOUT_DEFAULTS,
+        title=dict(
+            text="Order Book Heatmap with Regime Overlay",
+            x=0.01, y=0.98,
+            xanchor="left",
+        ),
+        height=560,
+        margin=dict(l=55, r=16, t=36, b=32),
         legend=dict(
-            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+            orientation="h",
+            yanchor="bottom",
+            y=1.01,
+            xanchor="right",
+            x=1,
+            font=dict(size=10, color="#8b949e"),
+            bgcolor="rgba(0,0,0,0)",
         ),
     )
 
