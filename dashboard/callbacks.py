@@ -1,12 +1,12 @@
 """Dash callbacks for dashboard interactivity.
 
-Handles synchronized crosshairs, date range selection, regime filtering,
-and play/pause animation controls.
+Handles time range selection and regime filtering via DMC components.
 """
 
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 from dash import Dash, Input, Output, State, callback_context, no_update
 
 from dashboard.components.heatmap import create_heatmap_figure
@@ -40,33 +40,23 @@ def register_callbacks(app: Dash, data: dict | None = None) -> None:
             Output("diagnostics-panel", "figure"),
         ],
         [
-            Input("date-range-slider", "value"),
-            Input("regime-quiet-btn", "n_clicks"),
-            Input("regime-trending-btn", "n_clicks"),
-            Input("regime-toxic-btn", "n_clicks"),
-        ],
-        [
-            State("regime-quiet-btn", "className"),
-            State("regime-trending-btn", "className"),
-            State("regime-toxic-btn", "className"),
+            Input("time-start-select", "value"),
+            Input("time-end-select", "value"),
+            Input("regime-chip-group", "value"),
         ],
     )
-    def update_panels(
-        date_range,
-        quiet_clicks,
-        trending_clicks,
-        toxic_clicks,
-        quiet_cls,
-        trending_cls,
-        toxic_cls,
-    ):
+    def update_panels(start_val, end_val, active_regimes):
         snapshots = _data["snapshots"]
         features = _data["features"]
         hmm = _data["hmm"]
         cum_pnl = _data["cumulative_pnl"]
 
-        # Apply date range slider
-        start_idx, end_idx = date_range if date_range else (0, len(snapshots) - 1)
+        # Values are string indices from Select options
+        start_idx = int(start_val) if start_val is not None else 0
+        end_idx = int(end_val) if end_val is not None else len(snapshots) - 1
+        if start_idx > end_idx:
+            start_idx, end_idx = end_idx, start_idx
+
         sl = slice(start_idx, end_idx + 1)
 
         snap_sub = snapshots.iloc[sl].reset_index(drop=True)
@@ -76,33 +66,6 @@ def register_callbacks(app: Dash, data: dict | None = None) -> None:
         pnl_sub = cum_pnl[sl]
         timestamps_sub = feat_sub["timestamp"].values
 
-        # Determine which regimes are active from button toggle state
-        ctx = callback_context
-        active_regimes = {0, 1, 2}
-
-        if quiet_cls and "inactive" in quiet_cls:
-            active_regimes.discard(0)
-        if trending_cls and "inactive" in trending_cls:
-            active_regimes.discard(1)
-        if toxic_cls and "inactive" in toxic_cls:
-            active_regimes.discard(2)
-
-        # Handle button clicks to toggle
-        if ctx.triggered:
-            trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
-            toggle_map = {
-                "regime-quiet-btn": 0,
-                "regime-trending-btn": 1,
-                "regime-toxic-btn": 2,
-            }
-            if trigger_id in toggle_map:
-                rid = toggle_map[trigger_id]
-                if rid in active_regimes:
-                    active_regimes.discard(rid)
-                else:
-                    active_regimes.add(rid)
-
-        # For display, keep original regimes (always show all for context)
         display_states = states_sub.copy()
 
         heatmap_fig = create_heatmap_figure(snap_sub, display_states)
@@ -113,36 +76,3 @@ def register_callbacks(app: Dash, data: dict | None = None) -> None:
         diag_fig = create_diagnostics_figure(feat_sub, display_states, pnl_sub)
 
         return heatmap_fig, regime_fig, depth_fig, diag_fig
-
-    @app.callback(
-        Output("regime-quiet-btn", "className"),
-        Input("regime-quiet-btn", "n_clicks"),
-        State("regime-quiet-btn", "className"),
-        prevent_initial_call=True,
-    )
-    def toggle_quiet(n_clicks, current_cls):
-        if current_cls and "inactive" in current_cls:
-            return "regime-btn regime-btn-quiet"
-        return "regime-btn regime-btn-quiet inactive"
-
-    @app.callback(
-        Output("regime-trending-btn", "className"),
-        Input("regime-trending-btn", "n_clicks"),
-        State("regime-trending-btn", "className"),
-        prevent_initial_call=True,
-    )
-    def toggle_trending(n_clicks, current_cls):
-        if current_cls and "inactive" in current_cls:
-            return "regime-btn regime-btn-trending"
-        return "regime-btn regime-btn-trending inactive"
-
-    @app.callback(
-        Output("regime-toxic-btn", "className"),
-        Input("regime-toxic-btn", "n_clicks"),
-        State("regime-toxic-btn", "className"),
-        prevent_initial_call=True,
-    )
-    def toggle_toxic(n_clicks, current_cls):
-        if current_cls and "inactive" in current_cls:
-            return "regime-btn regime-btn-toxic"
-        return "regime-btn regime-btn-toxic inactive"

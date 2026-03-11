@@ -84,6 +84,15 @@ def create_depth_surface_figure(
         [1.0, REGIME_COLORS[2]],
     ]
 
+    # Minimal scene axes: very faint gridlines, no background panels
+    _scene_axis_common = dict(
+        backgroundcolor="rgba(0,0,0,0)",
+        gridcolor="rgba(255,255,255,0.04)",
+        showbackground=False,
+        tickfont=dict(size=9, color="#5a6575"),
+        showspikes=False,
+    )
+
     fig = go.Figure()
 
     fig.add_trace(
@@ -95,23 +104,18 @@ def create_depth_surface_figure(
             colorscale=colorscale,
             cmin=0,
             cmax=2,
-            opacity=0.88,
+            opacity=0.92,
             showscale=False,
             lighting=dict(
-                ambient=0.5,
-                diffuse=0.6,
-                specular=0.15,
-                roughness=0.6,
-                fresnel=0.1,
+                ambient=0.55,
+                diffuse=0.65,
+                specular=0.08,
+                roughness=0.70,
+                fresnel=0.05,
             ),
-            lightposition=dict(x=100, y=200, z=300),
+            lightposition=dict(x=100, y=200, z=400),
             contours=dict(
-                z=dict(
-                    show=True,
-                    usecolormap=False,
-                    color="rgba(255,255,255,0.08)",
-                    width=1,
-                ),
+                z=dict(show=False),
             ),
             hovertemplate=(
                 "Price Offset: %{x:.2f}<br>"
@@ -124,41 +128,30 @@ def create_depth_surface_figure(
 
     fig.update_layout(
         **PLOTLY_LAYOUT_DEFAULTS,
-        title=dict(
-            text="3D Order Book Depth Surface",
-            x=0.01, y=0.98,
-            xanchor="left",
-        ),
-        height=560,
-        margin=dict(l=0, r=0, t=36, b=0),
+        height=540,
+        margin=dict(l=0, r=0, t=8, b=0),
         scene=dict(
             xaxis=dict(
-                title=dict(text="Price Offset from Mid", font=dict(size=10, color="#6e7681")),
-                backgroundcolor="#0c1016",
-                gridcolor="rgba(255,255,255,0.05)",
-                showbackground=True,
-                tickfont=dict(size=9, color="#6e7681"),
+                title=dict(text="Price Offset", font=dict(size=10, color="#6b7685")),
+                nticks=6,
+                **_scene_axis_common,
             ),
             yaxis=dict(
-                title=dict(text="Time", font=dict(size=10, color="#6e7681")),
-                backgroundcolor="#0c1016",
-                gridcolor="rgba(255,255,255,0.05)",
-                showbackground=True,
-                tickfont=dict(size=9, color="#6e7681"),
+                title=dict(text="Time", font=dict(size=10, color="#6b7685")),
+                nticks=6,
+                **_scene_axis_common,
             ),
             zaxis=dict(
-                title=dict(text="Volume", font=dict(size=10, color="#6e7681")),
-                backgroundcolor="#0c1016",
-                gridcolor="rgba(255,255,255,0.05)",
-                showbackground=True,
-                tickfont=dict(size=9, color="#6e7681"),
+                title=dict(text="Volume", font=dict(size=10, color="#6b7685")),
+                nticks=5,
+                **_scene_axis_common,
             ),
             camera=dict(
-                eye=dict(x=1.6, y=-1.6, z=0.7),
+                eye=dict(x=1.5, y=-1.5, z=0.65),
                 up=dict(x=0, y=0, z=1),
             ),
             aspectmode="manual",
-            aspectratio=dict(x=1.2, y=1.5, z=0.7),
+            aspectratio=dict(x=1.2, y=1.5, z=0.6),
         ),
     )
 
