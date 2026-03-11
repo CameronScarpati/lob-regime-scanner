@@ -15,6 +15,25 @@ from dashboard.components.depth_surface import create_depth_surface_figure
 from dashboard.components.diagnostics import create_diagnostics_figure
 
 
+def _time_str_to_index(time_str: str | None, timestamps: pd.Series, default: int) -> int:
+    """Map an HH:MM or HH:MM:SS string to the nearest snapshot index."""
+    if not time_str:
+        return default
+    try:
+        parts = time_str.split(":")
+        h, m = int(parts[0]), int(parts[1])
+        s = int(parts[2]) if len(parts) > 2 else 0
+        target_seconds = h * 3600 + m * 60 + s
+
+        # Convert all timestamps to seconds-of-day and find nearest
+        ts_series = pd.to_datetime(timestamps)
+        sod = ts_series.dt.hour * 3600 + ts_series.dt.minute * 60 + ts_series.dt.second
+        diffs = (sod - target_seconds).abs()
+        return int(diffs.idxmin())
+    except (ValueError, TypeError, AttributeError):
+        return default
+
+
 def register_callbacks(app: Dash, data: dict | None = None) -> None:
     """Register all Dash callbacks on the given app instance.
 
@@ -40,20 +59,25 @@ def register_callbacks(app: Dash, data: dict | None = None) -> None:
             Output("diagnostics-panel", "figure"),
         ],
         [
-            Input("time-start-dropdown", "value"),
-            Input("time-end-dropdown", "value"),
+            Input("time-start-input", "value"),
+            Input("time-end-input", "value"),
             Input("regime-chip-group", "value"),
         ],
     )
-    def update_panels(start_val, end_val, active_regimes):
+    def update_panels(start_time, end_time, active_regimes):
         snapshots = _data["snapshots"]
         features = _data["features"]
         hmm = _data["hmm"]
         cum_pnl = _data["cumulative_pnl"]
 
-        # Apply time range from Select dropdowns
-        start_idx = int(start_val) if start_val is not None else 0
-        end_idx = int(end_val) if end_val is not None else len(snapshots) - 1
+        # Map time strings to nearest snapshot indices
+        start_idx = _time_str_to_index(start_time, snapshots["timestamp"], 0)
+        end_idx = _time_str_to_index(end_time, snapshots["timestamp"], len(snapshots) - 1)
+
+        # Ensure start <= end
+        if start_idx > end_idx:
+            start_idx, end_idx = end_idx, start_idx
+
         sl = slice(start_idx, end_idx + 1)
 
         snap_sub = snapshots.iloc[sl].reset_index(drop=True)
