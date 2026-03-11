@@ -1,21 +1,15 @@
 """Tests for order book snapshot reconstructor."""
 
-import tempfile
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
-import pytest
 
 from src.book_reconstructor import (
     OrderBook,
-    reconstruct,
-    snapshots_to_dataframe,
-    resample_snapshots,
-    save_parquet,
     load_parquet,
     process_events_to_parquet,
-    N_LEVELS,
+    reconstruct,
+    resample_snapshots,
+    save_parquet,
 )
 
 
@@ -126,16 +120,14 @@ def _make_events(
     rows = []
 
     if snapshot_bids or snapshot_asks:
-        for price, qty in (snapshot_bids or []):
+        for price, qty in snapshot_bids or []:
             rows.append((base_ts, "snapshot", "bid", price, qty, 1, 1))
-        for price, qty in (snapshot_asks or []):
+        for price, qty in snapshot_asks or []:
             rows.append((base_ts, "snapshot", "ask", price, qty, 1, 1))
 
     if delta_updates:
         for i, (ts_offset, side, price, qty) in enumerate(delta_updates):
-            rows.append(
-                (base_ts + ts_offset, "delta", side, price, qty, 2 + i, 2 + i)
-            )
+            rows.append((base_ts + ts_offset, "delta", side, price, qty, 2 + i, 2 + i))
 
     return pd.DataFrame(
         rows,
@@ -188,8 +180,7 @@ class TestReconstruct:
 
     def test_empty_events(self):
         events = pd.DataFrame(
-            columns=["timestamp_us", "type", "side", "price", "qty",
-                      "update_id", "seq"]
+            columns=["timestamp_us", "type", "side", "price", "qty", "update_id", "seq"]
         )
         snapshots = reconstruct(events)
         assert len(snapshots) == 0
@@ -273,9 +264,7 @@ class TestProcessEventsToPipeline:
         )
 
         output_path = tmp_path / "output.parquet"
-        df = process_events_to_parquet(
-            events, output_path, n_levels=3, interval_us=1_000_000
-        )
+        df = process_events_to_parquet(events, output_path, n_levels=3, interval_us=1_000_000)
 
         assert output_path.exists()
         assert not df.empty
@@ -291,8 +280,7 @@ class TestProcessEventsToPipeline:
 
     def test_empty_events_produces_empty_output(self, tmp_path):
         events = pd.DataFrame(
-            columns=["timestamp_us", "type", "side", "price", "qty",
-                      "update_id", "seq"]
+            columns=["timestamp_us", "type", "side", "price", "qty", "update_id", "seq"]
         )
         output_path = tmp_path / "empty.parquet"
         df = process_events_to_parquet(events, output_path)

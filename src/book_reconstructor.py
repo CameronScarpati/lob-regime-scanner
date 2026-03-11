@@ -1,7 +1,7 @@
 """Order book snapshot reconstructor.
 
 Maintains full bid/ask book as sorted price-level dictionaries,
-applies snapshot and delta updates from parsed Bybit data, resamples
+applies snapshot updates from parsed Tardis data, resamples
 to uniform time intervals, and outputs Parquet snapshots.
 
 Output schema (per the project spec):
@@ -30,7 +30,6 @@ N_LEVELS = 10  # Number of book levels to include in output snapshots
 
 # Try importing the C++ backend; fall back to pure Python if unavailable.
 try:
-    from src.cpp._lob_cpp import LOBEngine as _CppLOBEngine
     from src.cpp._lob_cpp import batch_reconstruct as _cpp_batch_reconstruct
 
     _CPP_AVAILABLE = True
@@ -47,7 +46,7 @@ class OrderBook:
     A quantity of zero removes the level.
     """
 
-    __slots__ = ("bids", "asks", "last_update_ts")
+    __slots__ = ("asks", "bids", "last_update_ts")
 
     def __init__(self) -> None:
         self.bids: dict[float, float] = {}  # price -> qty
@@ -170,7 +169,7 @@ def _reconstruct_python(
                 side_rows = group[group["side"] == side]
                 if not side_rows.empty:
                     levels = list(
-                        zip(side_rows["price"].values, side_rows["qty"].values)
+                        zip(side_rows["price"].values, side_rows["qty"].values, strict=False)
                     )
                     book.apply_snapshot(side, levels)
         else:
@@ -261,8 +260,7 @@ def reconstruct(
 
     if use_cpp and not _CPP_AVAILABLE:
         raise RuntimeError(
-            "C++ LOB engine requested but not available. "
-            "Rebuild with: pip install -e '.[dev]'"
+            "C++ LOB engine requested but not available. Rebuild with: pip install -e '.[dev]'"
         )
 
     if use_cpp:

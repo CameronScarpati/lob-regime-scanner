@@ -31,40 +31,87 @@ source .venv/bin/activate
 
 # Run tests
 make test
+```
 
-# Launch the dashboard (demo mode with synthetic data)
+## Quick Start
+
+```bash
+# Launch the dashboard with synthetic data (no download needed)
 python -m dashboard.app --demo
 
-# Launch with real Bybit data
-python -m dashboard.app --symbol BTCUSDT --start 2025-01-15 --end 2025-01-16
+# Download free sample data (1st of any month, no API key needed)
+python data/download.py --symbol BTCUSDT --start 2024-01-01 --end 2024-01-01
+
+# Launch dashboard with real data
+python -m dashboard.app --symbol BTCUSDT --start 2024-01-01 --end 2024-01-01
 ```
 
 ### Downloading Data
 
-The downloader supports two data sources:
-
-**Tardis.dev (default)** — Professional-grade tick-level data for 40+ crypto exchanges. Free sample data (1st of each month) requires no API key. Full historical access needs a paid key from [tardis.dev](https://tardis.dev).
+Data is sourced from [Tardis.dev](https://tardis.dev) — professional-grade tick-level order book data for 40+ crypto exchanges. Uses direct HTTP download (no SDK required). Free sample data for the **1st of each month** is available without an API key. Full historical access requires a paid key.
 
 ```bash
-# Download via Tardis.dev (free sample: 1st of any month, no key needed)
-python data/download.py --source tardis --symbol BTCUSDT --start 2025-01-01 --end 2025-01-02
+# Free sample data: 1st of any month, no API key needed
+python data/download.py --symbol BTCUSDT --start 2024-01-01 --end 2024-01-01
 
-# Download with full Tardis API access
-python data/download.py --source tardis --symbol BTCUSDT --start 2025-01-15 --end 2025-01-21 \
+# Multiple free months at once (downloads 1st of Jan, Feb, Mar)
+python data/download.py --symbol BTCUSDT --start 2024-01-01 --end 2024-03-01
+
+# Full API access (any date, requires paid key)
+python data/download.py --symbol BTCUSDT --start 2024-06-15 --end 2024-06-21 \
   --tardis-api-key YOUR_KEY
-# Or set the TARDIS_API_KEY environment variable
+# Or: export TARDIS_API_KEY=YOUR_KEY
 
-# Download from a different exchange (e.g. Binance)
-python data/download.py --source tardis --exchange binance --symbol BTCUSDT \
-  --start 2025-01-01 --end 2025-01-02
+# Different exchange (e.g. Binance Futures)
+python data/download.py --exchange binance --symbol BTCUSDT \
+  --start 2024-01-01 --end 2024-01-01
 ```
 
-**Bybit** — Direct download from Bybit's public archives. Note: archives are only available for recent dates (~May 2025 onward).
+#### Download Options
 
 ```bash
-# Download Bybit L2 order book data (no API key needed)
-python data/download.py --source bybit --symbol BTCUSDT --start 2025-06-01 --end 2025-06-07
+python data/download.py [OPTIONS]
+
+  --symbol TEXT          Trading pair (default: BTCUSDT)
+  --start DATE          Start date YYYY-MM-DD (required)
+  --end DATE            End date YYYY-MM-DD (required)
+  --exchange NAME       Exchange source (default: bybit)
+  --data-type TYPE      Tardis data type (default: book_snapshot_25)
+                        Choices: book_snapshot_25, book_snapshot_5, incremental_book_L2
+  --output-dir PATH     Output directory (default: data/raw/)
+  --tardis-api-key KEY  Tardis.dev API key (or set TARDIS_API_KEY env var)
 ```
+
+#### Supported Exchanges
+
+| `--exchange` | Tardis API Target | Description |
+|-------------|-------------------|-------------|
+| `bybit` | `bybit` | Bybit derivatives (default) |
+| `binance` | `binance-futures` | Binance USD-M Futures |
+| `binance-spot` | `binance` | Binance spot market |
+| `okx` | `okex-swap` | OKX perpetual swaps |
+| `deribit` | `deribit` | Deribit options/futures |
+
+The exchange parameter only affects which data source is downloaded. Once stored locally, all exchanges use the same Tardis schema and the pipeline processes them identically.
+
+### Dashboard Options
+
+```bash
+python -m dashboard.app [OPTIONS]
+
+  --symbol TEXT        Trading pair (default: BTCUSDT)
+  --start DATE         Start date, e.g. 2024-01-01
+  --end DATE           End date, e.g. 2024-01-01
+  --sample-interval N  Snapshot subsampling interval in ms (default: 100)
+                       Lower = more detail, higher = faster loading
+                       Recommended: 10 (tick-level), 100 (default), 1000 (fast)
+  --demo               Use synthetic mock data
+  --host HOST          Bind address (default: 0.0.0.0)
+  --port PORT          Port (default: 8050)
+  --debug              Enable Dash debug mode
+```
+
+The `--sample-interval` flag controls how much of the raw tick data is retained. Tardis `book_snapshot_25` files contain a snapshot on every book change (potentially millions per day). The default 100ms interval captures microstructure dynamics (OFI bursts, spread widening) while keeping memory usage reasonable (~864k snapshots/day). Use `--sample-interval 1000` for faster loading on large date ranges, or `--sample-interval 10` for near-tick-level resolution.
 
 ## Architecture
 
@@ -75,23 +122,22 @@ python data/download.py --source bybit --symbol BTCUSDT --start 2025-06-01 --end
 │  Data Layer   │  Feature Eng  │  HMM Engine   │  Dashboard       │
 │               │               │               │                  │
 │ Tardis.dev    │ OFI (multi-   │ Gaussian HMM  │ Bookmap-style    │
-│ (40+ crypto   │   level)      │ (3 states)    │ LOB heatmap      │
-│  exchanges)   │ VPIN          │               │                  │
-│ Bybit L2      │ Spread stats  │ Viterbi path  │ Regime overlay   │
-│ historical    │ Book imbal.   │ decoding      │ bands            │
-│               │ Trade flow    │               │                  │
-│ C++ LOB       │ aggression    │ Forward-       │ 3D depth         │
-│ reconstruc-   │ Kyle's λ      │ backward      │ surface          │
-│ tion engine   │ Cancel ratio  │ posterior      │                  │
-│ (pybind11)    │ Realized vol  │ probabilities │ Toxicity gauge   │
+│ (direct HTTP, │   level)      │ (3 states)    │ LOB heatmap      │
+│  40+ exchanges│ VPIN          │               │                  │
+│  free 1st/mo) │ Spread stats  │ Viterbi path  │ Regime overlay   │
+│               │ Book imbal.   │ decoding      │ bands            │
+│ Configurable  │ Trade flow    │               │                  │
+│ subsampling   │ aggression    │ Forward-       │ 3D depth         │
+│ (100ms default│ Kyle's λ      │ backward      │ surface          │
+│  via --sample-│ Cancel ratio  │ posterior      │                  │
+│  interval)    │ Realized vol  │ probabilities │ Toxicity gauge   │
 │               │ (multi-freq)  │               │ (VPIN, OFI,      │
-│ JSONL + CSV   │ Ret autocorr  │ BIC/AIC model │  spread, PnL)    │
-│ format        │               │ selection     │                  │
-│ support       │               │               │                  │
+│ Direct CSV    │ Ret autocorr  │ BIC/AIC model │  spread, PnL)    │
+│ loading       │               │ selection     │                  │
 └───────────────┴───────────────┴───────────────┴──────────────────┘
 
-Data Flow:  Tardis/Bybit L2 > LOB Reconstruction > Feature Matrix > HMM Fit/Decode > Dashboard
-                 (1M+ updates/s via C++)  (15 features, z-scored)  (EM + Viterbi)
+Data Flow:  Tardis CSV → load_snapshots (subsample) → Feature Matrix → HMM Fit/Decode → Dashboard
+                            (direct column mapping)   (15 features, z-scored)  (EM + Viterbi)
 ```
 
 ## Project Structure
@@ -99,19 +145,20 @@ Data Flow:  Tardis/Bybit L2 > LOB Reconstruction > Feature Matrix > HMM Fit/Deco
 ```
 lob-regime-scanner/
 ├── src/                    # Core library
-│   ├── data_loader.py      #   Multi-source L2 parser (Tardis, Bybit JSONL + CSV)
-│   ├── book_reconstructor.py   LOB snapshot reconstruction
+│   ├── data_loader.py      #   Tardis book_snapshot CSV parser + direct snapshots loader
+│   ├── book_reconstructor.py   LOB snapshot reconstruction (C++ accelerated)
 │   ├── features.py         #   OFI, VPIN, Kyle's λ, 15 features total
 │   ├── hmm_model.py        #   Gaussian HMM regime detection + diagnostics
 │   ├── backtest.py         #   Regime-conditional strategy validation
 │   └── cpp/                #   C++ LOB engine (pybind11)
 ├── dashboard/              # Plotly Dash app — 4 synchronized panels
-│   ├── app.py              #   Main app, CLI (--demo, --symbol, --start, --end)
+│   ├── app.py              #   Main app, CLI (--demo, --symbol, --sample-interval)
 │   ├── pipeline.py         #   End-to-end data > model > viz wiring
 │   ├── callbacks.py        #   Dash callbacks for interactivity
 │   └── components/         #   Heatmap, regime probs, 3D surface, diagnostics
 ├── data/                   # Data download scripts
-│   └── download.py         #   Multi-source downloader (Tardis.dev + Bybit)
+│   ├── download.py         #   Tardis.dev downloader (direct HTTP, no SDK)
+│   └── generate_realistic.py  Synthetic data generator (Tardis CSV format)
 ├── notebooks/              # Analysis notebooks
 │   ├── 01_data_exploration.ipynb
 │   ├── 02_feature_engineering.ipynb
@@ -137,6 +184,14 @@ lob-regime-scanner/
 
 - [Methodology](docs/methodology.md) — Mathematical formulation of OFI, VPIN, Gaussian HMM, model selection criteria, and backtesting methodology
 - [Results](docs/results.md) — Key findings framed for quantitative research audience
+
+## Development
+
+```bash
+make test              # Run pytest suite (158 tests)
+make lint              # Run ruff linter
+make format            # Auto-format with ruff
+```
 
 ## References
 
