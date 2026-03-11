@@ -100,10 +100,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--sample-interval",
         type=int,
-        default=100,
-        help="Snapshot subsampling interval in milliseconds (default: 100). "
+        default=1000,
+        help="Snapshot subsampling interval in milliseconds (default: 1000). "
         "Lower values capture more microstructure detail but use more memory. "
-        "Try 1000 for faster loading, 10 for tick-level resolution.",
+        "Try 100 for sub-second resolution, 10 for tick-level detail.",
     )
     parser.add_argument(
         "--debug",
@@ -316,7 +316,8 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                         dmc.Paper(
                             radius="md",
                             withBorder=True,
-                            p="xs",
+                            pt="xs",
+                            pb="md",
                             px="lg",
                             children=dmc.Group(
                                 justify="space-between",
@@ -324,7 +325,7 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                     # Time range selector (left)
                                     dmc.Group(
                                         gap="sm",
-                                        style={"flex": "1", "maxWidth": "600px"},
+                                        style={"flex": "1", "maxWidth": "700px"},
                                         children=[
                                             dmc.Text(
                                                 "Time Range",
