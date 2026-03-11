@@ -1,6 +1,6 @@
 """Dash callbacks for dashboard interactivity.
 
-Handles time range selection and regime filtering via DMC components.
+Handles regime filtering via DMC components.
 """
 
 from __future__ import annotations
@@ -39,37 +39,22 @@ def register_callbacks(app: Dash, data: dict | None = None) -> None:
             Output("diagnostics-panel", "figure"),
         ],
         [
-            Input("time-start-select", "value"),
-            Input("time-end-select", "value"),
             Input("regime-chip-group", "value"),
         ],
     )
-    def update_panels(start_val, end_val, active_regimes):
+    def update_panels(active_regimes):
         snapshots = _data["snapshots"]
         features = _data["features"]
         hmm = _data["hmm"]
         cum_pnl = _data["cumulative_pnl"]
 
-        # Values are string indices from Select options
-        start_idx = int(start_val) if start_val is not None else 0
-        end_idx = int(end_val) if end_val is not None else len(snapshots) - 1
-        if start_idx > end_idx:
-            start_idx, end_idx = end_idx, start_idx
+        states = hmm["states"]
+        probs = hmm["state_probs"]
+        timestamps = features["timestamp"].values
 
-        sl = slice(start_idx, end_idx + 1)
-
-        snap_sub = snapshots.iloc[sl].reset_index(drop=True)
-        feat_sub = features.iloc[sl].reset_index(drop=True)
-        states_sub = hmm["states"][sl]
-        probs_sub = hmm["state_probs"][sl]
-        pnl_sub = cum_pnl[sl]
-        timestamps_sub = feat_sub["timestamp"].values
-
-        display_states = states_sub.copy()
-
-        heatmap_fig = create_heatmap_figure(snap_sub, display_states)
-        regime_fig = create_regime_probs_figure(timestamps_sub, probs_sub, hmm["transition_matrix"])
-        depth_fig = create_depth_surface_figure(snap_sub, display_states)
-        diag_fig = create_diagnostics_figure(feat_sub, display_states, pnl_sub)
+        heatmap_fig = create_heatmap_figure(snapshots, states)
+        regime_fig = create_regime_probs_figure(timestamps, probs, hmm["transition_matrix"])
+        depth_fig = create_depth_surface_figure(snapshots, states)
+        diag_fig = create_diagnostics_figure(features, states, cum_pnl)
 
         return heatmap_fig, regime_fig, depth_fig, diag_fig
