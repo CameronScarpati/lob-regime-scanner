@@ -71,11 +71,23 @@ PLOTLY_LAYOUT_DEFAULTS = dict(
     ),
 )
 
-# Shared axis styling — clean gridlines, readable tick labels
+# Shared axis styling — academic-style framing with clean gridlines
 AXIS_STYLE = dict(
+    showline=True,
+    linewidth=1,
+    linecolor="rgba(255,255,255,0.12)",
+    mirror=True,
+    ticks="inside",
+    tickwidth=1,
+    tickcolor="rgba(255,255,255,0.10)",
     gridcolor="rgba(255,255,255,0.05)",
-    zerolinecolor="rgba(255,255,255,0.08)",
+    gridwidth=1,
+    zeroline=False,
     tickfont=dict(size=11, color="#7a8490", family=_FONT_FAMILY),
     title_font=dict(size=12, color="#98a2ae", family=_FONT_FAMILY),
-    gridwidth=1,
+    title_standoff=8,
+    automargin=True,
 )
+
+# X-axis variant: hide vertical gridlines for cleaner look
+XAXIS_STYLE = dict(**AXIS_STYLE, showgrid=False)

@@ -12,6 +12,7 @@ from dashboard._constants import (
     PLOTLY_LAYOUT_DEFAULTS,
     REGIME_COLORS,
     REGIME_NAMES,
+    XAXIS_STYLE,
 )
 
 
@@ -103,7 +104,7 @@ def create_regime_probs_figure(
     )
     fig.update_xaxes(
         title_text="", row=1, col=1,
-        **AXIS_STYLE,
+        **XAXIS_STYLE,
     )
     fig.update_yaxes(
         autorange="reversed", row=1, col=2,
