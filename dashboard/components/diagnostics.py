@@ -16,6 +16,7 @@ from dashboard._constants import (
     REGIME_COLORS,
     REGIME_FILLS,
     REGIME_NAMES,
+    XAXIS_STYLE,
 )
 
 
@@ -203,7 +204,7 @@ def create_diagnostics_figure(
     # Apply consistent axis styles
     for row_num in range(1, 5):
         fig.update_yaxes(row=row_num, col=1, **AXIS_STYLE)
-        fig.update_xaxes(row=row_num, col=1, **AXIS_STYLE)
+        fig.update_xaxes(row=row_num, col=1, **XAXIS_STYLE)
 
     fig.update_yaxes(title_text="VPIN", row=1, col=1)
     fig.update_yaxes(title_text="OFI", row=2, col=1)
