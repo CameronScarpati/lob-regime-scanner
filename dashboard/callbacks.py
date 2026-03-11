@@ -1,6 +1,6 @@
 """Dash callbacks for dashboard interactivity.
 
-Handles regime filtering via DMC components.
+Handles regime filtering and time-range selection via DMC components.
 """
 
 from __future__ import annotations
@@ -40,21 +40,28 @@ def register_callbacks(app: Dash, data: dict | None = None) -> None:
         ],
         [
             Input("regime-chip-group", "value"),
+            Input("time-range-slider", "value"),
         ],
     )
-    def update_panels(active_regimes):
+    def update_panels(active_regimes, time_range):
         snapshots = _data["snapshots"]
         features = _data["features"]
         hmm = _data["hmm"]
         cum_pnl = _data["cumulative_pnl"]
 
-        states = hmm["states"]
-        probs = hmm["state_probs"]
+        # Slice data to the selected time range
+        t_start, t_end = time_range
+        snapshots = snapshots.iloc[t_start : t_end + 1].reset_index(drop=True)
+        features = features.iloc[t_start : t_end + 1].reset_index(drop=True)
+        states = hmm["states"][t_start : t_end + 1]
+        probs = hmm["state_probs"][t_start : t_end + 1]
+        sliced_pnl = cum_pnl[t_start : t_end + 1]
+
         timestamps = features["timestamp"].values
 
         heatmap_fig = create_heatmap_figure(snapshots, states)
         regime_fig = create_regime_probs_figure(timestamps, probs, hmm["transition_matrix"])
         depth_fig = create_depth_surface_figure(snapshots, states)
-        diag_fig = create_diagnostics_figure(features, states, cum_pnl)
+        diag_fig = create_diagnostics_figure(features, states, sliced_pnl)
 
         return heatmap_fig, regime_fig, depth_fig, diag_fig
