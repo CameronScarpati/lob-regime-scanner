@@ -18,6 +18,7 @@ import sys
 
 from dash import Dash, dcc, html
 
+from dashboard._constants import PANEL_DESCRIPTIONS
 from dashboard.callbacks import register_callbacks
 from dashboard.components.heatmap import create_heatmap_figure
 from dashboard.components.regime_probs import create_regime_probs_figure
@@ -250,6 +251,12 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                     html.Div(
                         className="panel",
                         children=[
+                            html.Div(className="panel-header", children=[
+                                html.Div("Order-Book Heatmap with Regime Overlay",
+                                         className="panel-title"),
+                                html.Div(PANEL_DESCRIPTIONS["heatmap"],
+                                         className="panel-description"),
+                            ]),
                             dcc.Graph(
                                 id="heatmap-panel",
                                 figure=init_heatmap,
@@ -264,6 +271,12 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                     html.Div(
                         className="panel",
                         children=[
+                            html.Div(className="panel-header", children=[
+                                html.Div("Regime Posterior Probabilities",
+                                         className="panel-title"),
+                                html.Div(PANEL_DESCRIPTIONS["regime_probs"],
+                                         className="panel-description"),
+                            ]),
                             dcc.Graph(
                                 id="regime-probs-panel",
                                 figure=init_regime,
@@ -274,6 +287,12 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                     html.Div(
                         className="panel",
                         children=[
+                            html.Div(className="panel-header", children=[
+                                html.Div("3-D Order-Book Depth Surface",
+                                         className="panel-title"),
+                                html.Div(PANEL_DESCRIPTIONS["depth_surface"],
+                                         className="panel-description"),
+                            ]),
                             dcc.Graph(
                                 id="depth-surface-panel",
                                 figure=init_depth,
@@ -287,6 +306,12 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                     html.Div(
                         className="panel",
                         children=[
+                            html.Div(className="panel-header", children=[
+                                html.Div("Microstructure Diagnostics",
+                                         className="panel-title"),
+                                html.Div(PANEL_DESCRIPTIONS["diagnostics"],
+                                         className="panel-description"),
+                            ]),
                             dcc.Graph(
                                 id="diagnostics-panel",
                                 figure=init_diag,

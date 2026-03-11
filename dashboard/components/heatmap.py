@@ -88,8 +88,8 @@ def create_heatmap_figure(
         rows=2,
         cols=1,
         shared_xaxes=True,
-        row_heights=[0.06, 0.94],
-        vertical_spacing=0.015,
+        row_heights=[0.05, 0.95],
+        vertical_spacing=0.012,
     )
 
     # --- Regime overlay band (top strip) ---
@@ -102,7 +102,7 @@ def create_heatmap_figure(
                 fill="tozeroy",
                 fillcolor=color,
                 line=dict(width=0),
-                opacity=0.8,
+                opacity=0.75,
                 name=REGIME_NAMES[regime_id],
                 showlegend=True,
                 hoverinfo="skip",
@@ -112,16 +112,16 @@ def create_heatmap_figure(
         )
 
     # --- LOB heatmap ---
-    # Custom dark-friendly colorscale: black -> deep blue -> teal -> gold -> white
+    # Professional colorscale: dark base -> deep blue -> teal -> warm gold
     bookmap_colorscale = [
         [0.00, "rgba(12,16,22,1)"],
-        [0.05, "rgba(10,30,60,1)"],
-        [0.15, "rgba(13,55,110,1)"],
-        [0.30, "rgba(0,110,140,1)"],
-        [0.50, "rgba(0,168,120,1)"],
-        [0.70, "rgba(180,180,40,1)"],
-        [0.85, "rgba(255,200,50,1)"],
-        [1.00, "rgba(255,255,220,1)"],
+        [0.04, "rgba(10,28,54,1)"],
+        [0.12, "rgba(12,50,100,1)"],
+        [0.25, "rgba(0,95,130,1)"],
+        [0.42, "rgba(0,152,115,1)"],
+        [0.60, "rgba(140,165,50,1)"],
+        [0.80, "rgba(220,185,50,1)"],
+        [1.00, "rgba(255,248,210,1)"],
     ]
 
     fig.add_trace(
@@ -132,17 +132,24 @@ def create_heatmap_figure(
             colorscale=bookmap_colorscale,
             zsmooth="best",
             colorbar=dict(
-                title=dict(text="Vol", font=dict(size=10, color="#6e7681")),
-                len=0.82,
-                y=0.40,
+                title=dict(
+                    text="Volume",
+                    font=dict(size=11, color="#98a2ae"),
+                    side="right",
+                ),
+                len=0.78,
+                y=0.42,
                 thickness=10,
-                tickfont=dict(size=9, color="#6e7681"),
+                tickfont=dict(size=10, color="#7a8490"),
                 bgcolor="rgba(0,0,0,0)",
                 borderwidth=0,
+                outlinewidth=0,
             ),
             showlegend=False,
             hovertemplate=(
-                "Time: %{x}<br>Price: $%{y:,.2f}<br>Volume: %{z:.2f}"
+                "Time: %{x}<br>"
+                "Price: $%{y:,.2f}<br>"
+                "Volume: %{z:.2f}"
                 "<extra></extra>"
             ),
         ),
@@ -156,7 +163,7 @@ def create_heatmap_figure(
             x=time_axis,
             y=snapshots["mid_price"].values,
             mode="lines",
-            line=dict(color="rgba(255,255,255,0.65)", width=1.2, dash="dot"),
+            line=dict(color="rgba(255,255,255,0.60)", width=1.3, dash="dot"),
             name="Mid Price",
             showlegend=True,
             hovertemplate="Mid: $%{y:,.2f}<extra></extra>",
@@ -175,7 +182,7 @@ def create_heatmap_figure(
         large_mask = np.zeros(len(trade_sizes), dtype=bool)
     if large_mask.any():
         colors = [
-            "#00c853" if s == "buy" else "#ff5252"
+            "#4CAF82" if s == "buy" else "#EF6C6C"
             for s in snapshots.loc[large_mask, "last_trade_side"]
         ]
         fig.add_trace(
@@ -184,16 +191,17 @@ def create_heatmap_figure(
                 y=snapshots.loc[large_mask, "last_trade_price"].values,
                 mode="markers",
                 marker=dict(
-                    size=np.clip(trade_sizes[large_mask] * 5, 3, 10),
+                    size=np.clip(trade_sizes[large_mask] * 5, 4, 11),
                     color=colors,
-                    opacity=0.8,
-                    line=dict(width=0.5, color="rgba(255,255,255,0.3)"),
+                    opacity=0.85,
+                    line=dict(width=0.6, color="rgba(255,255,255,0.35)"),
                     symbol="diamond",
                 ),
                 name="Large Trades",
                 showlegend=True,
                 hovertemplate=(
-                    "Trade: %{y:,.2f}<br>Qty: %{marker.size:.1f}"
+                    "Trade: $%{y:,.2f}<br>"
+                    "Size: %{marker.size:.1f}"
                     "<extra></extra>"
                 ),
             ),
@@ -223,21 +231,18 @@ def create_heatmap_figure(
 
     fig.update_layout(
         **PLOTLY_LAYOUT_DEFAULTS,
-        title=dict(
-            text="Order Book Heatmap with Regime Overlay",
-            x=0.01, y=0.98,
-            xanchor="left",
-        ),
-        height=560,
-        margin=dict(l=55, r=16, t=36, b=32),
+        height=540,
+        margin=dict(l=60, r=20, t=8, b=36),
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=1.01,
+            y=1.02,
             xanchor="right",
             x=1,
-            font=dict(size=10, color="#8b949e"),
+            font=dict(size=11, color="#98a2ae"),
             bgcolor="rgba(0,0,0,0)",
+            itemsizing="constant",
+            tracegroupgap=4,
         ),
     )
 
