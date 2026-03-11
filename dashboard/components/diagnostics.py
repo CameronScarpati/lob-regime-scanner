@@ -19,12 +19,22 @@ def _add_regime_backgrounds(
     regimes: np.ndarray,
     row: int,
     col: int = 1,
+    max_vrects: int = 100,
 ) -> None:
-    """Add semi-transparent regime-colored background rectangles to a subplot."""
+    """Add semi-transparent regime-colored background rectangles to a subplot.
+
+    Uses vrect shapes for a small number of segments. When there are too many
+    regime transitions, skips background coloring for performance.
+    """
     if len(regimes) == 0:
         return
 
     changes = np.where(np.diff(regimes) != 0)[0] + 1
+    n_segments = len(changes) + 1
+
+    if n_segments > max_vrects:
+        return  # too many transitions — skip for performance
+
     starts = np.concatenate([[0], changes])
     ends = np.concatenate([changes, [len(regimes)]])
 

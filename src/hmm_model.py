@@ -168,7 +168,11 @@ class RegimeDetector:
         if self.covariance_type == "diag":
             self.model._covars_ = raw_covars[order]
         elif self.covariance_type == "full":
-            self.model.covars_ = raw_covars[order]
+            reordered = raw_covars[order].copy()
+            # Enforce symmetry to avoid floating-point validation errors
+            for i in range(len(reordered)):
+                reordered[i] = (reordered[i] + reordered[i].T) / 2.0
+            self.model._covars_ = reordered
         elif self.covariance_type == "spherical":
             self.model.covars_ = raw_covars[order]
 
