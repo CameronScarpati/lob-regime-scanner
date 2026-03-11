@@ -182,19 +182,7 @@ def run_pipeline(
     )
 
     # ── Step 5: Prepare dashboard-compatible output ──────────────────────
-    # Subsample for dashboard performance (target ~3600 points max)
-    max_display = 3600
-    if len(snap_df) > max_display:
-        step = len(snap_df) // max_display
-        display_idx = np.arange(0, len(snap_df), step)
-        snap_df = snap_df.iloc[display_idx].reset_index(drop=True)
-        feature_matrix = feature_matrix.iloc[display_idx].reset_index(drop=True)
-        states = states[display_idx]
-        state_probs = state_probs[display_idx]
-        bt_pnl = bt.cumulative_pnl[display_idx]
-        logger.info("Subsampled to %d points for dashboard display", len(snap_df))
-    else:
-        bt_pnl = bt.cumulative_pnl
+    bt_pnl = bt.cumulative_pnl
 
     # Convert microsecond timestamps to datetime for dashboard display
     snap_out = snap_df.copy()
