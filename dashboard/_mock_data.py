@@ -40,9 +40,9 @@ def generate_transition_matrix() -> np.ndarray:
     """Return a realistic 3x3 HMM transition matrix."""
     tm = np.array(
         [
-            [0.96, 0.03, 0.01],  # Quiet  -> mostly stays quiet
-            [0.05, 0.90, 0.05],  # Trending -> somewhat persistent
-            [0.10, 0.05, 0.85],  # Toxic -> high self-persistence
+            [0.92, 0.05, 0.03],  # Quiet  -> persistent but transitions regularly
+            [0.07, 0.87, 0.06],  # Trending -> moderate persistence
+            [0.06, 0.08, 0.86],  # Toxic -> high self-persistence
         ]
     )
     return tm
