@@ -1,4 +1,11 @@
-/* LOB Regime Scanner Dashboard — Premium Dark Theme */
+/* LOB Regime Scanner Dashboard — Publication-Quality Dark Theme
+ *
+ * Design goals:
+ *   • Clean enough to screenshot straight into a research paper
+ *   • Legible typography with clear visual hierarchy
+ *   • Generous whitespace — let the charts breathe
+ *   • Muted chrome; vibrant but tasteful data colours
+ */
 
 /* ── Reset & base ── */
 * {
@@ -8,21 +15,20 @@
 }
 
 body {
-    background-color: #0a0e14;
-    color: #d4d8df;
-    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
-        sans-serif;
+    background-color: #080c12;
+    color: #d0d6de;
+    font-family: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
     font-size: 14px;
-    line-height: 1.5;
+    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
 
 /* ── App container ── */
 #app-container {
-    max-width: 1800px;
+    max-width: 1860px;
     margin: 0 auto;
-    padding: 10px 16px;
+    padding: 14px 20px 24px;
 }
 
 /* ── Header ── */
@@ -30,53 +36,53 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 24px;
-    margin-bottom: 8px;
-    background: linear-gradient(135deg, #0f1923 0%, #131d2a 50%, #0f1923 100%);
-    border: 1px solid rgba(88, 166, 255, 0.12);
-    border-radius: 6px;
+    padding: 14px 28px;
+    margin-bottom: 10px;
+    background: linear-gradient(135deg, #0d1420 0%, #111c2b 50%, #0d1420 100%);
+    border: 1px solid rgba(92, 156, 245, 0.12);
+    border-radius: 8px;
 }
 
 .dashboard-header h1 {
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 700;
-    color: #e8edf3;
-    letter-spacing: 1.2px;
+    color: #edf0f5;
+    letter-spacing: 1.6px;
     text-transform: uppercase;
-    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    white-space: nowrap;
 }
 
 .header-meta {
     display: flex;
-    gap: 28px;
-    font-size: 12px;
-    color: #6e7681;
+    gap: 32px;
+    font-size: 13px;
+    color: #8892a0;
 }
 
 .header-meta span {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
 }
 
 .header-meta .label {
-    color: #4d8fcc;
+    color: #5C9CF5;
     font-weight: 600;
     text-transform: uppercase;
     font-size: 10px;
-    letter-spacing: 0.8px;
+    letter-spacing: 1px;
 }
 
 /* ── Controls bar ── */
 .controls-bar {
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 8px 20px;
-    margin-bottom: 8px;
-    background-color: #0f1923;
-    border: 1px solid rgba(88, 166, 255, 0.08);
-    border-radius: 6px;
+    gap: 20px;
+    padding: 10px 24px;
+    margin-bottom: 10px;
+    background-color: #0d1420;
+    border: 1px solid rgba(92, 156, 245, 0.08);
+    border-radius: 8px;
 }
 
 .controls-bar .slider-container {
@@ -85,10 +91,10 @@ body {
 
 .controls-bar .slider-label {
     font-size: 10px;
-    color: #6e7681;
+    color: #7a8490;
     margin-bottom: 2px;
     text-transform: uppercase;
-    letter-spacing: 0.8px;
+    letter-spacing: 1px;
     font-weight: 600;
 }
 
@@ -101,17 +107,17 @@ body {
 
 .regime-filters .filter-label {
     font-size: 10px;
-    color: #6e7681;
+    color: #7a8490;
     margin-right: 4px;
     text-transform: uppercase;
-    letter-spacing: 0.8px;
+    letter-spacing: 1px;
     font-weight: 600;
 }
 
 .regime-btn {
-    padding: 4px 14px;
+    padding: 5px 16px;
     border: 1.5px solid;
-    border-radius: 4px;
+    border-radius: 5px;
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
@@ -122,18 +128,18 @@ body {
 }
 
 .regime-btn-quiet {
-    color: #00c853;
-    border-color: rgba(0, 200, 83, 0.5);
+    color: #4CAF82;
+    border-color: rgba(76, 175, 130, 0.50);
 }
 
 .regime-btn-trending {
-    color: #448aff;
-    border-color: rgba(68, 138, 255, 0.5);
+    color: #5C9CF5;
+    border-color: rgba(92, 156, 245, 0.50);
 }
 
 .regime-btn-toxic {
-    color: #ff5252;
-    border-color: rgba(255, 82, 82, 0.5);
+    color: #EF6C6C;
+    border-color: rgba(239, 108, 108, 0.50);
 }
 
 .regime-btn:hover {
@@ -151,44 +157,70 @@ body {
     display: grid;
     grid-template-columns: 1fr 1fr;
     grid-template-rows: auto auto;
-    gap: 8px;
+    gap: 10px;
 }
 
 .panel {
-    background-color: #0f1318;
+    background-color: #0c1119;
     border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 6px;
-    padding: 4px;
+    border-radius: 8px;
+    padding: 0;
     overflow: hidden;
+    transition: border-color 0.25s ease;
 }
 
 .panel:hover {
-    border-color: rgba(88, 166, 255, 0.2);
-    transition: border-color 0.25s ease;
+    border-color: rgba(92, 156, 245, 0.18);
+}
+
+/* ── Panel header (title + description) ── */
+.panel-header {
+    padding: 14px 20px 8px;
+}
+
+.panel-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #dce1e8;
+    letter-spacing: 0.3px;
+    margin-bottom: 3px;
+}
+
+.panel-description {
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: #6b7685;
+    max-width: 680px;
 }
 
 /* ── Dash component overrides ── */
 .dash-graph .modebar {
-    top: 2px !important;
-    right: 2px !important;
-    opacity: 0.4;
+    top: 4px !important;
+    right: 4px !important;
+    opacity: 0.3;
 }
 
 .dash-graph .modebar:hover {
-    opacity: 0.9;
+    opacity: 0.85;
+}
+
+/* Ensure graphs don't have extra padding inside panels */
+.dash-graph {
+    margin: 0;
+    padding: 0;
 }
 
 .rc-slider-track {
-    background-color: #448aff !important;
+    background-color: #5C9CF5 !important;
 }
 
 .rc-slider-handle {
-    border-color: #448aff !important;
-    background-color: #0f1923 !important;
+    border-color: #5C9CF5 !important;
+    background-color: #0d1420 !important;
 }
 
 .rc-slider-rail {
-    background-color: #1e2a38 !important;
+    background-color: #1c2736 !important;
 }
 
 /* ── Range slider dark style ── */
@@ -203,11 +235,11 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-    background: #0a0e14;
+    background: #080c12;
 }
 
 ::-webkit-scrollbar-thumb {
-    background: #1e2a38;
+    background: #1c2736;
     border-radius: 3px;
 }
 
