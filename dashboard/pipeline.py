@@ -61,7 +61,7 @@ def run_pipeline(
     symbol: str = "BTCUSDT",
     start: str | None = None,
     end: str | None = None,
-    resample_interval_us: int = 1_000_000,
+    sample_interval_us: int = 100_000,
     hmm_n_states: int = 3,
 ) -> dict:
     """Execute the full LOB analysis pipeline.
@@ -72,8 +72,8 @@ def run_pipeline(
         Trading pair symbol (e.g. ``BTCUSDT``).
     start / end : str or None
         ISO date strings to filter the data range (e.g. ``2025-01-01``).
-    resample_interval_us : int
-        Resampling interval in microseconds (default 1s).
+    sample_interval_us : int
+        Snapshot subsampling interval in microseconds (default 100ms).
     hmm_n_states : int
         Number of HMM states (default 3).
 
@@ -104,7 +104,7 @@ def run_pipeline(
     snap_df = load_snapshots_directory(
         data_dir,
         symbol=symbol,
-        sample_interval_us=resample_interval_us,
+        sample_interval_us=sample_interval_us,
     )
     if snap_df.empty:
         raise NoDataError(f"Loaded 0 snapshots for {symbol}. Check your data files.")
