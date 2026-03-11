@@ -12,10 +12,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.backtest import run_backtest
 from src.data_loader import load_snapshots_directory
 from src.features import build_feature_matrix
-from src.hmm_model import RegimeDetector, REGIME_LABELS
-from src.backtest import run_backtest
+from src.hmm_model import REGIME_LABELS, RegimeDetector
 
 logger = logging.getLogger(__name__)
 
@@ -121,9 +121,7 @@ def run_pipeline(
         snap_df = snap_df[snap_df["timestamp"] <= end_us]
 
     if snap_df.empty:
-        raise NoDataError(
-            f"No snapshots remain after date filtering ({start} – {end})."
-        )
+        raise NoDataError(f"No snapshots remain after date filtering ({start} – {end}).")
 
     snap_df = snap_df.reset_index(drop=True)
 
@@ -164,7 +162,11 @@ def run_pipeline(
 
     # Use the first OFI column available
     ofi_col = next(
-        (c for c in feature_matrix.columns if c.startswith("ofi_") and "_zscore" not in c and "_velocity" not in c),
+        (
+            c
+            for c in feature_matrix.columns
+            if c.startswith("ofi_") and "_zscore" not in c and "_velocity" not in c
+        ),
         None,
     )
     ofi = feature_matrix[ofi_col].values if ofi_col else np.zeros(len(states))

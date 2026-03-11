@@ -14,8 +14,6 @@ from dashboard._constants import (
     AXIS_STYLE,
     PLOTLY_LAYOUT_DEFAULTS,
     REGIME_COLORS,
-    REGIME_FILLS,
-    REGIME_NAMES,
     XAXIS_STYLE,
 )
 
@@ -41,7 +39,7 @@ def _add_regime_backgrounds(
     starts = np.concatenate([[0], changes])
     ends = np.concatenate([changes, [len(regimes)]])
 
-    for s, e in zip(starts, ends):
+    for s, e in zip(starts, ends, strict=False):
         regime = int(regimes[s])
         fig.add_vrect(
             x0=timestamps[s],
@@ -173,10 +171,7 @@ def create_diagnostics_figure(
 
     # --- Row 4: Cumulative PnL ---
     pnl_color = "#4CAF82" if cumulative_pnl[-1] >= 0 else "#EF6C6C"
-    pnl_fill = (
-        "rgba(76,175,130,0.10)" if cumulative_pnl[-1] >= 0
-        else "rgba(239,108,108,0.10)"
-    )
+    pnl_fill = "rgba(76,175,130,0.10)" if cumulative_pnl[-1] >= 0 else "rgba(239,108,108,0.10)"
     fig.add_trace(
         go.Scatter(
             x=timestamps,

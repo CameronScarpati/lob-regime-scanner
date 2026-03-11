@@ -1,7 +1,6 @@
 """Tests for data download module (Tardis.dev)."""
 
 from datetime import date
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,21 +12,22 @@ from data.download import (
     download_tardis,
 )
 
-
 # ---------------------------------------------------------------------------
 # Tardis URL building
 # ---------------------------------------------------------------------------
+
 
 class TestBuildTardisUrl:
     def test_bybit_snapshot_url(self):
         url = _build_tardis_url("bybit", "book_snapshot_25", date(2024, 1, 1), "BTCUSDT")
         assert url == (
-            "https://datasets.tardis.dev/v1/bybit/book_snapshot_25"
-            "/2024/01/01/BTCUSDT.csv.gz"
+            "https://datasets.tardis.dev/v1/bybit/book_snapshot_25/2024/01/01/BTCUSDT.csv.gz"
         )
 
     def test_binance_futures_url(self):
-        url = _build_tardis_url("binance-futures", "incremental_book_L2", date(2024, 3, 1), "ETHUSDT")
+        url = _build_tardis_url(
+            "binance-futures", "incremental_book_L2", date(2024, 3, 1), "ETHUSDT"
+        )
         assert url == (
             "https://datasets.tardis.dev/v1/binance-futures/incremental_book_L2"
             "/2024/03/01/ETHUSDT.csv.gz"
@@ -42,6 +42,7 @@ class TestBuildTardisUrl:
 # Tardis _download_tardis_day (direct HTTP)
 # ---------------------------------------------------------------------------
 
+
 class TestDownloadTardisDay:
     @patch("data.download.requests.get")
     def test_downloads_and_saves(self, mock_get, tmp_path):
@@ -51,8 +52,11 @@ class TestDownloadTardisDay:
         mock_get.return_value = mock_resp
 
         result = _download_tardis_day(
-            "bybit", "book_snapshot_25", date(2024, 1, 1),
-            "BTCUSDT", tmp_path,
+            "bybit",
+            "book_snapshot_25",
+            date(2024, 1, 1),
+            "BTCUSDT",
+            tmp_path,
         )
 
         assert result is not None
@@ -68,8 +72,12 @@ class TestDownloadTardisDay:
         mock_get.return_value = mock_resp
 
         _download_tardis_day(
-            "bybit", "book_snapshot_25", date(2024, 1, 1),
-            "BTCUSDT", tmp_path, api_key="test-key",
+            "bybit",
+            "book_snapshot_25",
+            date(2024, 1, 1),
+            "BTCUSDT",
+            tmp_path,
+            api_key="test-key",
         )
 
         _, kwargs = mock_get.call_args
@@ -83,8 +91,11 @@ class TestDownloadTardisDay:
         mock_get.return_value = mock_resp
 
         _download_tardis_day(
-            "bybit", "book_snapshot_25", date(2024, 1, 1),
-            "BTCUSDT", tmp_path,
+            "bybit",
+            "book_snapshot_25",
+            date(2024, 1, 1),
+            "BTCUSDT",
+            tmp_path,
         )
 
         _, kwargs = mock_get.call_args
@@ -96,8 +107,11 @@ class TestDownloadTardisDay:
         existing.write_bytes(b"cached")
 
         result = _download_tardis_day(
-            "bybit", "book_snapshot_25", date(2024, 1, 1),
-            "BTCUSDT", tmp_path,
+            "bybit",
+            "book_snapshot_25",
+            date(2024, 1, 1),
+            "BTCUSDT",
+            tmp_path,
         )
 
         assert result == existing
@@ -110,8 +124,11 @@ class TestDownloadTardisDay:
         mock_get.return_value = mock_resp
 
         result = _download_tardis_day(
-            "bybit", "book_snapshot_25", date(2024, 6, 15),
-            "BTCUSDT", tmp_path,
+            "bybit",
+            "book_snapshot_25",
+            date(2024, 6, 15),
+            "BTCUSDT",
+            tmp_path,
         )
         assert result is None
 
@@ -122,8 +139,11 @@ class TestDownloadTardisDay:
         mock_get.return_value = mock_resp
 
         result = _download_tardis_day(
-            "bybit", "book_snapshot_25", date(2024, 1, 1),
-            "INVALID", tmp_path,
+            "bybit",
+            "book_snapshot_25",
+            date(2024, 1, 1),
+            "INVALID",
+            tmp_path,
         )
         assert result is None
 
@@ -131,6 +151,7 @@ class TestDownloadTardisDay:
 # ---------------------------------------------------------------------------
 # download (multi-day)
 # ---------------------------------------------------------------------------
+
 
 class TestDownload:
     @patch("data.download._download_tardis_day")
@@ -141,7 +162,9 @@ class TestDownload:
         ]
 
         result = download(
-            "BTCUSDT", "2024-01-01", "2024-01-02",
+            "BTCUSDT",
+            "2024-01-01",
+            "2024-01-02",
             output_dir=tmp_path,
         )
         assert len(result) == 2
@@ -152,8 +175,11 @@ class TestDownload:
         mock_dl.return_value = tmp_path / "f.csv.gz"
 
         download(
-            "BTCUSDT", "2024-01-01", "2024-01-01",
-            output_dir=tmp_path, exchange="binance",
+            "BTCUSDT",
+            "2024-01-01",
+            "2024-01-01",
+            output_dir=tmp_path,
+            exchange="binance",
         )
 
         # Should map "binance" -> "binance-futures"
@@ -165,15 +191,18 @@ class TestDownload:
         mock_dl.return_value = tmp_path / "f.csv.gz"
 
         download(
-            "BTCUSDT", "2024-01-01", "2024-01-01",
-            output_dir=tmp_path, api_key="my-key",
+            "BTCUSDT",
+            "2024-01-01",
+            "2024-01-01",
+            output_dir=tmp_path,
+            api_key="my-key",
         )
 
         _, kwargs = mock_dl.call_args
         assert kwargs["api_key"] == "my-key"
 
     def test_invalid_range_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="end .* must be >= start"):
+        with pytest.raises(ValueError, match=r"end .* must be >= start"):
             download("BTCUSDT", "2024-02-01", "2024-01-01", tmp_path)
 
     def test_download_tardis_alias(self):

@@ -33,9 +33,7 @@ TARDIS_EXCHANGE_MAP = {
 }
 
 
-def _build_tardis_url(
-    exchange: str, data_type: str, dt: date, symbol: str
-) -> str:
+def _build_tardis_url(exchange: str, data_type: str, dt: date, symbol: str) -> str:
     """Build a direct Tardis.dev datasets download URL.
 
     URL format: https://datasets.tardis.dev/v1/{exchange}/{data_type}/{YYYY}/{MM}/{DD}/{SYMBOL}.csv.gz
@@ -194,9 +192,7 @@ def download(
                 ", ".join(non_free[:5]) + ("..." if len(non_free) > 5 else ""),
             )
         else:
-            logger.info(
-                "No API key — using free sample data (1st of each month)."
-            )
+            logger.info("No API key — using free sample data (1st of each month).")
 
     paths = []
     current = start
@@ -257,7 +253,8 @@ if __name__ == "__main__":
     parser.add_argument("--end", required=True, help="End date (YYYY-MM-DD)")
     parser.add_argument("--output-dir", default=None, help="Output directory")
     parser.add_argument(
-        "--exchange", default="bybit",
+        "--exchange",
+        default="bybit",
         help="Exchange name (default: bybit)",
     )
     parser.add_argument(

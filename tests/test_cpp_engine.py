@@ -11,8 +11,8 @@ from src.cpp import CPP_AVAILABLE
 if not CPP_AVAILABLE:
     pytest.skip("C++ LOB engine not built", allow_module_level=True)
 
-from src.cpp._lob_cpp import LOBEngine, batch_reconstruct
 from src.book_reconstructor import reconstruct
+from src.cpp._lob_cpp import LOBEngine, batch_reconstruct
 
 
 class TestLOBEngine:
@@ -104,19 +104,16 @@ def _make_events(
     """Helper to construct an events DataFrame for testing."""
     rows = []
     if snapshot_bids or snapshot_asks:
-        for price, qty in (snapshot_bids or []):
+        for price, qty in snapshot_bids or []:
             rows.append((base_ts, "snapshot", "bid", price, qty, 1, 1))
-        for price, qty in (snapshot_asks or []):
+        for price, qty in snapshot_asks or []:
             rows.append((base_ts, "snapshot", "ask", price, qty, 1, 1))
     if delta_updates:
         for i, (ts_offset, side, price, qty) in enumerate(delta_updates):
-            rows.append(
-                (base_ts + ts_offset, "delta", side, price, qty, 2 + i, 2 + i)
-            )
+            rows.append((base_ts + ts_offset, "delta", side, price, qty, 2 + i, 2 + i))
     return pd.DataFrame(
         rows,
-        columns=["timestamp_us", "type", "side", "price", "qty",
-                 "update_id", "seq"],
+        columns=["timestamp_us", "type", "side", "price", "qty", "update_id", "seq"],
     )
 
 
@@ -160,8 +157,7 @@ class TestBatchReconstruct:
 
     def test_empty_events(self):
         events = pd.DataFrame(
-            columns=["timestamp_us", "type", "side", "price", "qty",
-                     "update_id", "seq"]
+            columns=["timestamp_us", "type", "side", "price", "qty", "update_id", "seq"]
         )
         snapshots = reconstruct(events, n_levels=10, use_cpp=True)
         assert len(snapshots) == 0
@@ -184,7 +180,7 @@ class TestBatchReconstruct:
         cpp_snaps = reconstruct(events, n_levels=3, use_cpp=True)
 
         assert len(py_snaps) == len(cpp_snaps)
-        for py_row, cpp_row in zip(py_snaps, cpp_snaps):
+        for py_row, cpp_row in zip(py_snaps, cpp_snaps, strict=False):
             assert py_row.keys() == cpp_row.keys()
             for k in py_row:
                 py_val = py_row[k]

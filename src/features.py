@@ -33,6 +33,7 @@ AUTOCORR_LAGS = list(range(1, 11))
 # Helper: rolling z-score
 # ---------------------------------------------------------------------------
 
+
 def _rolling_zscore(series: pd.Series, window: int = ZSCORE_WINDOW) -> pd.Series:
     """Z-score normalise *series* using a trailing rolling window."""
     mu = series.rolling(window, min_periods=1).mean()
@@ -44,6 +45,7 @@ def _rolling_zscore(series: pd.Series, window: int = ZSCORE_WINDOW) -> pd.Series
 # ---------------------------------------------------------------------------
 # 2.1  Order Flow Imbalance (OFI)
 # ---------------------------------------------------------------------------
+
 
 def compute_ofi(df: pd.DataFrame, depths: list[int] | None = None) -> pd.DataFrame:
     """Compute OFI at multiple depths with z-score normalisation and velocity.
@@ -85,6 +87,7 @@ def compute_ofi(df: pd.DataFrame, depths: list[int] | None = None) -> pd.DataFra
 # ---------------------------------------------------------------------------
 # 2.2  VPIN (flowrisk)
 # ---------------------------------------------------------------------------
+
 
 def compute_vpin(
     df: pd.DataFrame,
@@ -129,11 +132,13 @@ def compute_vpin(
         bucket_volume = max(total_vol / 50.0, 1.0)
 
     # Build the time-bar DataFrame expected by flowrisk
-    time_bars = pd.DataFrame({
-        "time": range(len(prices)),
-        "price": prices,
-        "volume": volumes,
-    })
+    time_bars = pd.DataFrame(
+        {
+            "time": range(len(prices)),
+            "price": prices,
+            "volume": volumes,
+        }
+    )
 
     cfg = BulkVPINConfig()
     cfg.BUCKET_MAX_VOLUME = float(bucket_volume)
@@ -162,6 +167,7 @@ def compute_vpin(
 # ---------------------------------------------------------------------------
 # 2.3  Additional microstructure features
 # ---------------------------------------------------------------------------
+
 
 def compute_book_imbalance(df: pd.DataFrame, depth: int = N_LEVELS) -> pd.Series:
     """(V_bid − V_ask) / (V_bid + V_ask) at top *depth* levels."""
@@ -219,10 +225,10 @@ def compute_kyles_lambda(
     xy_mean = (x * y).rolling(window, min_periods=max(window // 2, 2)).mean()
     x_mean = x.rolling(window, min_periods=max(window // 2, 2)).mean()
     y_mean = y.rolling(window, min_periods=max(window // 2, 2)).mean()
-    x2_mean = (x ** 2).rolling(window, min_periods=max(window // 2, 2)).mean()
+    x2_mean = (x**2).rolling(window, min_periods=max(window // 2, 2)).mean()
 
     cov_xy = xy_mean - x_mean * y_mean
-    var_x = x2_mean - x_mean ** 2
+    var_x = x2_mean - x_mean**2
     var_x = var_x.replace(0, np.nan)
 
     return (cov_xy / var_x).rename("kyles_lambda")
@@ -244,7 +250,9 @@ def compute_trade_flow_aggression(df: pd.DataFrame) -> pd.Series:
     buy_mask = side == "buy"
     sell_mask = side == "sell"
     is_aggressive.loc[buy_mask] = (price[buy_mask] >= df.loc[buy_mask, "ask_price_1"]).astype(float)
-    is_aggressive.loc[sell_mask] = (price[sell_mask] <= df.loc[sell_mask, "bid_price_1"]).astype(float)
+    is_aggressive.loc[sell_mask] = (price[sell_mask] <= df.loc[sell_mask, "bid_price_1"]).astype(
+        float
+    )
 
     return is_aggressive.rolling(ZSCORE_WINDOW, min_periods=1).mean().rename("trade_aggression")
 
@@ -276,7 +284,7 @@ def compute_realized_volatility(
     log_ret = np.log(df["mid_price"] / df["mid_price"].shift(1))
     result = pd.DataFrame(index=df.index)
     for h in horizons:
-        r2_sum = (log_ret ** 2).rolling(h, min_periods=1).sum()
+        r2_sum = (log_ret**2).rolling(h, min_periods=1).sum()
         result[f"rvol_{h}s"] = np.sqrt(r2_sum)
     return result
 
@@ -293,16 +301,16 @@ def compute_return_autocorrelation(
     result = pd.DataFrame(index=df.index)
     for k in lags:
         shifted = log_ret.shift(k)
-        result[f"ret_autocorr_{k}"] = (
-            log_ret.rolling(window, min_periods=max(window // 2, k + 2))
-            .corr(shifted)
-        )
+        result[f"ret_autocorr_{k}"] = log_ret.rolling(
+            window, min_periods=max(window // 2, k + 2)
+        ).corr(shifted)
     return result
 
 
 # ---------------------------------------------------------------------------
 # 2.4  Feature matrix assembly
 # ---------------------------------------------------------------------------
+
 
 def build_feature_matrix(
     df: pd.DataFrame,

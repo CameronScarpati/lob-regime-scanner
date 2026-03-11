@@ -15,7 +15,6 @@ import pandas as pd
 from hmmlearn.hmm import GaussianHMM
 from scipy import stats as sp_stats
 
-
 # Default regime labels
 REGIME_LABELS = {0: "Quiet", 1: "Trending", 2: "Toxic"}
 
@@ -105,7 +104,7 @@ class RegimeDetector:
             arr = arr.reshape(-1, 1)
         return arr
 
-    def fit(self, X: pd.DataFrame | np.ndarray) -> "RegimeDetector":
+    def fit(self, X: pd.DataFrame | np.ndarray) -> RegimeDetector:
         """Fit the HMM on a feature matrix.
 
         Parameters
@@ -280,18 +279,10 @@ class RegimeDetector:
             mask = states == state
             if mask.sum() == 0:
                 continue
-            result.means[state] = {
-                k: float(np.mean(v[mask])) for k, v in data.items()
-            }
-            result.stds[state] = {
-                k: float(np.std(v[mask])) for k, v in data.items()
-            }
-            result.skews[state] = {
-                k: float(sp_stats.skew(v[mask])) for k, v in data.items()
-            }
-            result.kurtoses[state] = {
-                k: float(sp_stats.kurtosis(v[mask])) for k, v in data.items()
-            }
+            result.means[state] = {k: float(np.mean(v[mask])) for k, v in data.items()}
+            result.stds[state] = {k: float(np.std(v[mask])) for k, v in data.items()}
+            result.skews[state] = {k: float(sp_stats.skew(v[mask])) for k, v in data.items()}
+            result.kurtoses[state] = {k: float(sp_stats.kurtosis(v[mask])) for k, v in data.items()}
 
         # Duration statistics
         result.durations = _compute_durations(states, self.n_states)
@@ -316,12 +307,11 @@ class RegimeDetector:
         dict with agreement_rate and confusion_matrix.
         """
         hmm_states = self.predict(X)
-        n = len(hmm_states)
         agreement = np.mean(hmm_states == threshold_states)
 
         n_states_max = max(self.n_states, int(threshold_states.max()) + 1)
         confusion = np.zeros((n_states_max, n_states_max), dtype=int)
-        for h, t in zip(hmm_states, threshold_states):
+        for h, t in zip(hmm_states, threshold_states, strict=False):
             confusion[h, t] += 1
 
         return {
@@ -375,9 +365,7 @@ def select_model(
     return result
 
 
-def _compute_durations(
-    states: np.ndarray, n_states: int
-) -> dict[int, dict[str, float]]:
+def _compute_durations(states: np.ndarray, n_states: int) -> dict[int, dict[str, float]]:
     """Compute duration statistics per regime.
 
     Returns dict mapping state -> {mean, std, min, max, count}.
