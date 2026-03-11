@@ -20,6 +20,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+tardis = [
+    "tardis-dev>=2.0",
+]
 dev = [
     "pytest>=7.4",
     "pybind11>=2.11",
