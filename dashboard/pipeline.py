@@ -46,7 +46,7 @@ def _find_data_files(
             "Run `python data/download.py` to fetch order book snapshots first."
         )
 
-    patterns = ["*.jsonl.gz", "*.jsonl", "*.csv.gz", "*.csv"]
+    patterns = ["*.csv.gz", "*.csv"]
     files = []
     for pat in patterns:
         files.extend(DATA_DIR.glob(pat))

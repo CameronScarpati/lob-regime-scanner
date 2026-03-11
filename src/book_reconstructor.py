@@ -1,7 +1,7 @@
 """Order book snapshot reconstructor.
 
 Maintains full bid/ask book as sorted price-level dictionaries,
-applies snapshot and delta updates from parsed Bybit data, resamples
+applies snapshot updates from parsed Tardis data, resamples
 to uniform time intervals, and outputs Parquet snapshots.
 
 Output schema (per the project spec):
