@@ -201,7 +201,7 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
             html.Div(
                 className="dashboard-header",
                 children=[
-                    html.H1("LOB Regime Scanner"),
+                    html.H1("Limit Order Book Regime Scanner"),
                     html.Div(
                         className="header-meta",
                         children=[
