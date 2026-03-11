@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 from hmmlearn.hmm import GaussianHMM
 from scipy import stats as sp_stats
+from sklearn.preprocessing import StandardScaler
 
 # Default regime labels
 REGIME_LABELS = {0: "Quiet", 1: "Trending", 2: "Toxic"}
@@ -86,6 +87,7 @@ class RegimeDetector:
         self.model: GaussianHMM | None = None
         self._fitted = False
         self._diagnostics = Diagnostics()
+        self._scaler: StandardScaler | None = None
 
     @property
     def is_fitted(self) -> bool:
@@ -95,14 +97,32 @@ class RegimeDetector:
     def diagnostics(self) -> Diagnostics:
         return self._diagnostics
 
-    def _to_array(self, X: pd.DataFrame | np.ndarray) -> np.ndarray:
-        """Convert input to 2D numpy array."""
+    def _to_array(self, X: pd.DataFrame | np.ndarray, scale: bool = True) -> np.ndarray:
+        """Convert input to 2D numpy array, optionally applying the fitted scaler."""
         if isinstance(X, pd.DataFrame):
-            return X.values.astype(np.float64)
-        arr = np.asarray(X, dtype=np.float64)
+            arr = X.values.astype(np.float64)
+        else:
+            arr = np.asarray(X, dtype=np.float64)
         if arr.ndim == 1:
             arr = arr.reshape(-1, 1)
+        if scale and self._scaler is not None:
+            arr = self._scaler.transform(arr)
         return arr
+
+    def _regularize_covars(self, n_features: int, floor: float = 1e-3) -> None:
+        """Add a small diagonal floor to covariance matrices for numerical stability."""
+        if self.model is None:
+            return
+        if self.covariance_type == "full":
+            covars = self.model.covars_.copy()
+            eye = np.eye(n_features) * floor
+            for i in range(len(covars)):
+                covars[i] = (covars[i] + covars[i].T) / 2.0 + eye
+            self.model._covars_ = covars
+        elif self.covariance_type == "diag":
+            self.model._covars_ = np.maximum(self.model._covars_, floor)
+        elif self.covariance_type == "spherical":
+            self.model.covars_ = np.maximum(self.model.covars_, floor)
 
     def fit(self, X: pd.DataFrame | np.ndarray) -> RegimeDetector:
         """Fit the HMM on a feature matrix.
@@ -116,7 +136,16 @@ class RegimeDetector:
         -------
         self
         """
-        arr = self._to_array(X)
+        # Standardize features to improve numerical conditioning
+        self._scaler = StandardScaler()
+        if isinstance(X, pd.DataFrame):
+            raw = X.values.astype(np.float64)
+        else:
+            raw = np.asarray(X, dtype=np.float64)
+        if raw.ndim == 1:
+            raw = raw.reshape(-1, 1)
+        arr = self._scaler.fit_transform(raw)
+
         self.model = GaussianHMM(
             n_components=self.n_states,
             covariance_type=self.covariance_type,
@@ -126,6 +155,9 @@ class RegimeDetector:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             self.model.fit(arr)
+
+        # Regularize covariance matrices to ensure positive-definiteness
+        self._regularize_covars(arr.shape[1])
 
         self._fitted = True
         self._diagnostics = Diagnostics(

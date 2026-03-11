@@ -17,7 +17,6 @@ import os
 import sys
 
 import dash_mantine_components as dmc
-import pandas as pd
 from dash import Dash, dcc
 
 from dashboard._constants import PANEL_DESCRIPTIONS, REGIME_COLORS
@@ -33,34 +32,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _build_time_options(
-    timestamps: pd.Series,
-) -> list[dict[str, str]]:
-    """Build Select options from all available timestamps.
-
-    The pipeline already caps data at ~3600 points, so showing every
-    timestamp keeps the searchable dropdown usable while giving
-    precise time-window control.
-    """
-    n = len(timestamps)
-    if n == 0:
-        return []
-
-    ts_start = pd.Timestamp(timestamps.iloc[0])
-    ts_end = pd.Timestamp(timestamps.iloc[-1])
-    same_day = ts_start.date() == ts_end.date()
-
-    options: list[dict[str, str]] = []
-    for idx in range(n):
-        ts = pd.Timestamp(timestamps.iloc[idx])
-        if same_day:
-            label = ts.strftime("%-H:%M:%S")
-        else:
-            label = ts.strftime("%b %-d %H:%M:%S")
-        options.append({"label": label, "value": str(idx)})
-    return options
 
 
 def _make_panel(title: str, description: str, graph_id: str, figure, config: dict):
@@ -205,9 +176,6 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
     init_depth = create_depth_surface_figure(snap, hmm["states"])
     init_diag = create_diagnostics_figure(feat, hmm["states"], pnl)
 
-    # Build time picker options (sampled to ~80 entries)
-    time_options = _build_time_options(snap["timestamp"])
-
     # Determine data source label
     if args.demo:
         source_label = "Mock / Synthetic"
@@ -340,41 +308,8 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                             p="xs",
                             px="lg",
                             children=dmc.Group(
-                                justify="space-between",
+                                justify="flex-end",
                                 children=[
-                                    # Time window pickers
-                                    dmc.Group(
-                                        gap="sm",
-                                        children=[
-                                            dmc.Text(
-                                                "Time Window",
-                                                size="xs",
-                                                fw=600,
-                                                c="dimmed",
-                                                tt="uppercase",
-                                                style={"letterSpacing": "0.08em"},
-                                            ),
-                                            dmc.Select(
-                                                id="time-start-select",
-                                                data=time_options,
-                                                value=time_options[0]["value"],
-                                                searchable=True,
-                                                clearable=False,
-                                                w=130,
-                                                size="xs",
-                                            ),
-                                            dmc.Text("to", size="sm", c="dimmed"),
-                                            dmc.Select(
-                                                id="time-end-select",
-                                                data=time_options,
-                                                value=time_options[-1]["value"],
-                                                searchable=True,
-                                                clearable=False,
-                                                w=130,
-                                                size="xs",
-                                            ),
-                                        ],
-                                    ),
                                     # Regime filter chips
                                     dmc.Group(
                                         gap="sm",
