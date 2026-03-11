@@ -1,19 +1,19 @@
 """Historical L2 order book data downloader.
 
 Supports multiple data sources:
-  1. Bybit (primary): Downloads from quote-saver.bycsi.com and
-     public.bybit.com. Note: Bybit orderbook archives are only
-     available for recent dates (roughly May 2025 onward).
+  1. Bybit: Downloads from quote-saver.bycsi.com (orderbook archives,
+     available for recent dates roughly May 2025 onward).
   2. Tardis.dev: Professional-grade tick-level data for 40+ crypto
-     exchanges. Free sample data (1st of each month) without API key.
-     Full access requires a paid API key from https://tardis.dev.
+     exchanges. Free sample data (1st of each month) without API key
+     via direct HTTP download — no SDK required. Full access requires
+     a paid API key from https://tardis.dev.
 """
 
-import asyncio
 import gzip
 import io
 import logging
 import os
+import shutil
 import zipfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -28,20 +28,17 @@ DEFAULT_RAW_DIR = Path(__file__).parent / "raw"
 # Bybit URLs
 # ---------------------------------------------------------------------------
 BASE_URL = "https://quote-saver.bycsi.com/orderbook"
-LEGACY_BASE_URL = "https://public.bybit.com/orderbook"
 
 
 def _build_url(symbol: str, dt: date, market: str = "linear") -> str:
-    """Build the primary Bybit download URL."""
+    """Build the primary Bybit download URL.
+
+    Bybit hosts orderbook snapshots at quote-saver.bycsi.com.
+    The path structure is: /orderbook/{market}/{symbol}/{date}_{symbol}_ob200.data.zip
+    """
     date_str = dt.strftime("%Y-%m-%d")
     filename = f"{date_str}_{symbol}_ob200.data.zip"
     return f"{BASE_URL}/{market}/{symbol}/{filename}"
-
-
-def _build_legacy_url(symbol: str, dt: date) -> str:
-    """Build legacy download URL (public.bybit.com format)."""
-    date_str = dt.strftime("%Y-%m-%d")
-    return f"{LEGACY_BASE_URL}/{symbol}/{date_str}.csv.gz"
 
 
 def download_day(
@@ -53,13 +50,17 @@ def download_day(
 ) -> Path | None:
     """Download Bybit order book data for a single day.
 
-    Attempts the primary URL first, then falls back to legacy format.
+    Downloads from quote-saver.bycsi.com (ZIP archives containing
+    JSONL order book snapshots at 10ms granularity).
+
+    Note: Bybit orderbook archives are only available for recent dates
+    (roughly May 2025 onward). For older data, use ``download_tardis()``.
 
     Args:
         symbol: Trading pair (e.g. 'BTCUSDT').
         dt: Date to download.
         output_dir: Directory to save the file. Defaults to data/raw/.
-        market: Market type for URL construction.
+        market: Market type ('linear', 'inverse', or 'spot').
         timeout: Request timeout in seconds.
 
     Returns:
@@ -77,7 +78,6 @@ def download_day(
         logger.info("Already downloaded: %s", out_path.name)
         return out_path
 
-    # Try primary URL (ZIP with JSON)
     url = _build_url(symbol, dt, market)
     logger.info("Downloading %s ...", url)
 
@@ -85,22 +85,15 @@ def download_day(
         resp = requests.get(url, timeout=timeout, stream=True)
         if resp.status_code == 200:
             return _save_zip_as_jsonl_gz(resp.content, out_path)
-        logger.warning("Primary URL returned %d, trying legacy ...", resp.status_code)
+        logger.error(
+            "Bybit returned HTTP %d for %s. "
+            "Bybit orderbook archives are only available for recent dates "
+            "(~May 2025 onward). For older data, use --source tardis.",
+            resp.status_code,
+            date_str,
+        )
     except requests.RequestException as e:
-        logger.warning("Primary URL failed: %s, trying legacy ...", e)
-
-    # Try legacy URL (csv.gz)
-    legacy_url = _build_legacy_url(symbol, dt)
-    legacy_out = output_dir / f"{symbol}_{date_str}.csv.gz"
-    try:
-        resp = requests.get(legacy_url, timeout=timeout, stream=True)
-        if resp.status_code == 200:
-            legacy_out.write_bytes(resp.content)
-            logger.info("Saved (legacy): %s", legacy_out.name)
-            return legacy_out
-        logger.error("Legacy URL also returned %d", resp.status_code)
-    except requests.RequestException as e:
-        logger.error("Legacy URL also failed: %s", e)
+        logger.error("Bybit download failed: %s", e)
 
     return None
 
@@ -128,12 +121,12 @@ def _save_zip_as_jsonl_gz(zip_bytes: bytes, out_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Tardis.dev downloader
+# Tardis.dev downloader (direct HTTP — no SDK required)
 # ---------------------------------------------------------------------------
 
-# Map common symbol names to Tardis exchange identifiers.
-# Tardis uses exchange-specific naming; Bybit linear perps use the
-# same symbol format as the user would pass (e.g. "BTCUSDT").
+TARDIS_DATASETS_URL = "https://datasets.tardis.dev/v1"
+
+# Map common exchange names to Tardis exchange identifiers.
 TARDIS_EXCHANGE_MAP = {
     "bybit": "bybit",
     "binance": "binance-futures",
@@ -143,33 +136,92 @@ TARDIS_EXCHANGE_MAP = {
 }
 
 
-def _tardis_download_sync(
-    exchange: str,
-    data_types: list[str],
-    symbols: list[str],
-    from_date: str,
-    to_date: str,
-    download_dir: str,
-    api_key: str = "",
-) -> None:
-    """Synchronous wrapper around the async tardis-dev download."""
-    from tardis_dev import datasets
+def _build_tardis_url(
+    exchange: str, data_type: str, dt: date, symbol: str
+) -> str:
+    """Build a direct Tardis.dev datasets download URL.
 
-    loop = asyncio.new_event_loop()
+    URL format: https://datasets.tardis.dev/v1/{exchange}/{data_type}/{YYYY}/{MM}/{DD}/{SYMBOL}.csv.gz
+    """
+    return (
+        f"{TARDIS_DATASETS_URL}/{exchange}/{data_type}"
+        f"/{dt.year:04d}/{dt.month:02d}/{dt.day:02d}/{symbol}.csv.gz"
+    )
+
+
+def _download_tardis_day(
+    exchange: str,
+    data_type: str,
+    dt: date,
+    symbol: str,
+    output_dir: Path,
+    api_key: str = "",
+    timeout: int = 300,
+) -> Path | None:
+    """Download a single day of Tardis data via direct HTTP.
+
+    Args:
+        exchange: Tardis exchange identifier (e.g. 'bybit').
+        data_type: Tardis data type (e.g. 'book_snapshot_25').
+        dt: Date to download.
+        symbol: Trading pair (e.g. 'BTCUSDT').
+        output_dir: Directory to save the file.
+        api_key: Tardis API key (empty for free 1st-of-month data).
+        timeout: Request timeout in seconds.
+
+    Returns:
+        Path to the downloaded file, or None if download failed.
+    """
+    # Standard output filename: {exchange}_{data_type}_{date}_{symbol}.csv.gz
+    date_str = dt.strftime("%Y-%m-%d")
+    out_name = f"{exchange}_{data_type}_{date_str}_{symbol}.csv.gz"
+    out_path = output_dir / out_name
+
+    if out_path.exists():
+        logger.info("Already downloaded: %s", out_path.name)
+        return out_path
+
+    url = _build_tardis_url(exchange, data_type, dt, symbol)
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    logger.info("Downloading %s ...", url)
+
     try:
-        loop.run_until_complete(
-            datasets.download(
-                exchange=exchange,
-                data_types=data_types,
-                symbols=symbols,
-                from_date=from_date,
-                to_date=to_date,
-                download_dir=download_dir,
-                api_key=api_key,
+        resp = requests.get(url, headers=headers, timeout=timeout, stream=True)
+        if resp.status_code == 200:
+            out_path.write_bytes(resp.content)
+            size_mb = len(resp.content) / (1024 * 1024)
+            logger.info("Saved: %s (%.1f MB)", out_path.name, size_mb)
+            return out_path
+
+        if resp.status_code == 401:
+            logger.error(
+                "Tardis returned 401 Unauthorized for %s. "
+                "Free data is only available for the 1st of each month. "
+                "For other dates, provide an API key via --tardis-api-key "
+                "or the TARDIS_API_KEY environment variable.",
+                date_str,
             )
-        )
-    finally:
-        loop.close()
+        elif resp.status_code == 404:
+            logger.error(
+                "Tardis returned 404 for %s %s on %s. "
+                "The symbol or exchange may not be available for this date.",
+                exchange,
+                symbol,
+                date_str,
+            )
+        else:
+            logger.error(
+                "Tardis returned HTTP %d for %s",
+                resp.status_code,
+                date_str,
+            )
+    except requests.RequestException as e:
+        logger.error("Tardis download failed for %s: %s", date_str, e)
+
+    return None
 
 
 def download_tardis(
@@ -181,11 +233,14 @@ def download_tardis(
     data_type: str = "book_snapshot_25",
     api_key: str = "",
 ) -> list[Path]:
-    """Download order book data via Tardis.dev.
+    """Download order book data via Tardis.dev using direct HTTP.
 
-    Tardis.dev provides pre-reconstructed L2 order book snapshots as
-    compressed CSV files. Free sample data (1st of each month) is
-    available without an API key.
+    Downloads pre-reconstructed L2 order book snapshots as compressed
+    CSV files. No SDK installation required — uses the Tardis datasets
+    HTTP API directly.
+
+    Free sample data (1st of each month) is available without an API key.
+    For other dates, provide an API key from https://tardis.dev.
 
     Args:
         symbol: Trading pair (e.g. 'BTCUSDT').
@@ -203,14 +258,6 @@ def download_tardis(
     Returns:
         List of paths to downloaded CSV files.
     """
-    try:
-        from tardis_dev import datasets  # noqa: F401
-    except ImportError:
-        raise ImportError(
-            "tardis-dev is required for Tardis downloads. Install with:\n"
-            "  pip install tardis-dev"
-        )
-
     if isinstance(start, str):
         start = datetime.strptime(start, "%Y-%m-%d").date()
     if isinstance(end, str):
@@ -226,54 +273,53 @@ def download_tardis(
 
     tardis_exchange = TARDIS_EXCHANGE_MAP.get(exchange, exchange)
 
-    from_str = start.strftime("%Y-%m-%d")
-    # Tardis to_date is exclusive, so add 1 day
-    to_str = (end + timedelta(days=1)).strftime("%Y-%m-%d")
-
     logger.info(
         "Downloading %s %s from Tardis.dev (%s, %s to %s) ...",
         tardis_exchange,
         symbol,
         data_type,
-        from_str,
+        start.strftime("%Y-%m-%d"),
         end.strftime("%Y-%m-%d"),
     )
     if not api_key:
-        logger.info(
-            "No API key provided — only free sample data (1st of each month) "
-            "will be available. Get an API key at https://tardis.dev"
-        )
+        # Check if any requested dates are NOT 1st of month
+        non_free = []
+        current = start
+        while current <= end:
+            if current.day != 1:
+                non_free.append(current.strftime("%Y-%m-%d"))
+            current += timedelta(days=1)
+        if non_free:
+            logger.warning(
+                "No API key provided — only the 1st of each month is free. "
+                "These dates will likely fail: %s. "
+                "Get an API key at https://tardis.dev",
+                ", ".join(non_free[:5]) + ("..." if len(non_free) > 5 else ""),
+            )
+        else:
+            logger.info(
+                "No API key — using free sample data (1st of each month)."
+            )
 
-    # Tardis downloads files into a specific directory structure
-    download_dir = str(output_dir / "tardis_cache")
-
-    _tardis_download_sync(
-        exchange=tardis_exchange,
-        data_types=[data_type],
-        symbols=[symbol],
-        from_date=from_str,
-        to_date=to_str,
-        download_dir=download_dir,
-        api_key=api_key,
-    )
-
-    # Collect downloaded files and copy/link to output_dir with standard naming
-    cache_dir = Path(download_dir)
-    downloaded = sorted(cache_dir.rglob("*.csv.gz"))
     paths = []
-
-    for src in downloaded:
-        # Tardis names files like: bybit_book_snapshot_25_2024-01-01_BTCUSDT.csv.gz
-        dest = output_dir / src.name
-        if not dest.exists():
-            import shutil
-            shutil.copy2(src, dest)
-        paths.append(dest)
-        logger.info("Saved: %s", dest.name)
+    current = start
+    while current <= end:
+        path = _download_tardis_day(
+            exchange=tardis_exchange,
+            data_type=data_type,
+            dt=current,
+            symbol=symbol,
+            output_dir=output_dir,
+            api_key=api_key,
+        )
+        if path is not None:
+            paths.append(path)
+        current += timedelta(days=1)
 
     logger.info(
-        "Downloaded %d file(s) for %s via Tardis.dev",
+        "Downloaded %d/%d day(s) for %s via Tardis.dev",
         len(paths),
+        (end - start).days + 1,
         symbol,
     )
     return paths
