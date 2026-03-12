@@ -85,4 +85,3 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["src", "dashboard", "data"]
-
