@@ -6,7 +6,37 @@ build-backend = "setuptools.build_meta"
 name = "lob-regime-scanner"
 version = "0.1.0"
 description = "HMM-based market microstructure analytics for cryptocurrency order books"
+readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.11"
+authors = [
+    {name = "Cameron Scarpati", email = "138163850+CameronScarpati@users.noreply.github.com"},
+]
+keywords = [
+    "hidden-markov-model",
+    "order-book",
+    "market-microstructure",
+    "regime-detection",
+    "cryptocurrency",
+    "quantitative-finance",
+    "high-frequency-trading",
+    "vpin",
+    "order-flow-imbalance",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: C++",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Typing :: Typed",
+]
+
 dependencies = [
     "numpy>=1.24",
     "pandas>=2.0",
@@ -19,6 +49,12 @@ dependencies = [
     "scikit-learn>=1.3",
     "flowrisk>=0.2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/CameronScarpati/lob-regime-scanner"
+Repository = "https://github.com/CameronScarpati/lob-regime-scanner"
+Documentation = "https://github.com/CameronScarpati/lob-regime-scanner/blob/main/docs/methodology.md"
+Issues = "https://github.com/CameronScarpati/lob-regime-scanner/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -49,4 +85,3 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["src", "dashboard", "data"]
-
