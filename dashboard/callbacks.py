@@ -5,12 +5,15 @@ Handles regime filtering and time-range selection via DMC components.
 
 from __future__ import annotations
 
+import numpy as np
 from dash import Dash, Input, Output
 
 from dashboard.components.depth_surface import create_depth_surface_figure
 from dashboard.components.diagnostics import create_diagnostics_figure
 from dashboard.components.heatmap import create_heatmap_figure
 from dashboard.components.regime_probs import create_regime_probs_figure
+
+_REGIME_NAME_TO_ID = {"quiet": 0, "trending": 1, "toxic": 2}
 
 
 def register_callbacks(app: Dash, data: dict | None = None) -> None:
@@ -56,6 +59,24 @@ def register_callbacks(app: Dash, data: dict | None = None) -> None:
         states = hmm["states"][t_start : t_end + 1]
         probs = hmm["state_probs"][t_start : t_end + 1]
         sliced_pnl = cum_pnl[t_start : t_end + 1]
+
+        # Apply regime filtering: mask out timestamps belonging to deselected regimes
+        active_ids = {_REGIME_NAME_TO_ID[r] for r in (active_regimes or [])}
+        if active_ids and len(active_ids) < 3:
+            mask = np.isin(states, list(active_ids))
+            snapshots = snapshots.loc[mask].reset_index(drop=True)
+            features = features.loc[mask].reset_index(drop=True)
+            states = states[mask]
+            probs = probs[mask]
+            sliced_pnl = sliced_pnl[mask]
+
+        # Guard against empty selection
+        if len(snapshots) < 2:
+            snapshots = _data["snapshots"].iloc[:2].reset_index(drop=True)
+            features = _data["features"].iloc[:2].reset_index(drop=True)
+            states = hmm["states"][:2]
+            probs = hmm["state_probs"][:2]
+            sliced_pnl = cum_pnl[:2]
 
         timestamps = features["timestamp"].values
 

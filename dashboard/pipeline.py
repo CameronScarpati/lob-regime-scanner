@@ -224,4 +224,11 @@ def run_pipeline(
             "transition_matrix": trans_mat,
         },
         "cumulative_pnl": bt_pnl,
+        "backtest_stats": {
+            "sharpe_ratio": round(bt.sharpe_ratio, 2),
+            "max_drawdown": round(bt.max_drawdown, 4),
+            "n_trades": bt.n_trades,
+            "hit_rate": round(bt.hit_rate, 3),
+            "total_pnl": round(bt.total_pnl, 4),
+        },
     }

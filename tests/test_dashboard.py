@@ -7,6 +7,7 @@ import pytest
 from dashboard._constants import REGIME_COLORS, REGIME_NAMES
 from dashboard._mock_data import (
     generate_all,
+    generate_backtest_stats,
     generate_cumulative_pnl,
     generate_features,
     generate_hmm_output,
@@ -96,12 +97,22 @@ class TestMockData:
         pnl = generate_cumulative_pnl(n_timestamps=100)
         assert pnl.shape == (100,)
 
+    def test_backtest_stats_keys(self):
+        pnl = generate_cumulative_pnl(n_timestamps=100)
+        stats = generate_backtest_stats(pnl)
+        assert "sharpe_ratio" in stats
+        assert "max_drawdown" in stats
+        assert "n_trades" in stats
+        assert "hit_rate" in stats
+        assert "total_pnl" in stats
+
     def test_generate_all_keys(self):
         data = generate_all(n_timestamps=50)
         assert "snapshots" in data
         assert "features" in data
         assert "hmm" in data
         assert "cumulative_pnl" in data
+        assert "backtest_stats" in data
         assert len(data["snapshots"]) == 50
         assert len(data["features"]) == 50
 
@@ -171,10 +182,12 @@ class TestDepthSurfacePanel:
         fig = create_depth_surface_figure(data["snapshots"], data["hmm"]["states"])
         assert isinstance(fig, go.Figure)
 
-    def test_has_surface_trace(self, data):
+    def test_has_bid_and_ask_surfaces(self, data):
         fig = create_depth_surface_figure(data["snapshots"], data["hmm"]["states"])
-        assert len(fig.data) >= 1
+        # Two surfaces: bid + ask
+        assert len(fig.data) == 2
         assert isinstance(fig.data[0], go.Surface)
+        assert isinstance(fig.data[1], go.Surface)
 
 
 class TestDiagnosticsPanel:
@@ -188,9 +201,17 @@ class TestDiagnosticsPanel:
         )
         assert isinstance(fig, go.Figure)
 
-    def test_has_four_traces(self, data):
+    def test_has_five_traces_with_kyle(self, data):
         fig = create_diagnostics_figure(
             data["features"], data["hmm"]["states"], data["cumulative_pnl"]
+        )
+        # VPIN + OFI + Kyle's λ + Spread + PnL = 5 scatter traces
+        assert len(fig.data) == 5
+
+    def test_four_traces_without_kyle(self, data):
+        features = data["features"].drop(columns=["kyle_lambda"])
+        fig = create_diagnostics_figure(
+            features, data["hmm"]["states"], data["cumulative_pnl"]
         )
         # VPIN + OFI + Spread + PnL = 4 scatter traces
         assert len(fig.data) == 4
@@ -251,6 +272,7 @@ class TestAppCLI:
         assert "features" in data
         assert "hmm" in data
         assert "cumulative_pnl" in data
+        assert "backtest_stats" in data
 
 
 # ---------------------------------------------------------------------------
