@@ -210,9 +210,7 @@ class TestDiagnosticsPanel:
 
     def test_four_traces_without_kyle(self, data):
         features = data["features"].drop(columns=["kyle_lambda"])
-        fig = create_diagnostics_figure(
-            features, data["hmm"]["states"], data["cumulative_pnl"]
-        )
+        fig = create_diagnostics_figure(features, data["hmm"]["states"], data["cumulative_pnl"])
         # VPIN + OFI + Spread + PnL = 4 scatter traces
         assert len(fig.data) == 4
 
