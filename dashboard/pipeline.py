@@ -174,7 +174,11 @@ def run_pipeline(
     ofi_col = "ofi_1" if "ofi_1" in feature_matrix.columns else None
     if ofi_col is None:
         ofi_col = next(
-            (c for c in feature_matrix.columns if c.startswith("ofi_") and "_velocity" not in c and "_zscore" not in c),
+            (
+                c
+                for c in feature_matrix.columns
+                if c.startswith("ofi_") and "_velocity" not in c and "_zscore" not in c
+            ),
             None,
         )
     ofi = feature_matrix[ofi_col].values if ofi_col else np.zeros(len(states))
