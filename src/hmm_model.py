@@ -124,13 +124,21 @@ class RegimeDetector:
         elif self.covariance_type == "spherical":
             self.model.covars_ = np.maximum(self.model.covars_, floor)
 
-    def fit(self, X: pd.DataFrame | np.ndarray) -> RegimeDetector:
+    def fit(
+        self,
+        X: pd.DataFrame | np.ndarray,
+        n_restarts: int = 1,
+    ) -> RegimeDetector:
         """Fit the HMM on a feature matrix.
 
         Parameters
         ----------
         X : array-like of shape (n_samples, n_features)
             Feature matrix (e.g., from features.py).
+        n_restarts : int
+            Number of random restarts.  The run with the highest
+            log-likelihood is kept.  Helps avoid local optima that
+            collapse regimes.
 
         Returns
         -------
@@ -146,22 +154,33 @@ class RegimeDetector:
             raw = raw.reshape(-1, 1)
         arr = self._scaler.fit_transform(raw)
 
-        self.model = GaussianHMM(
-            n_components=self.n_states,
-            covariance_type=self.covariance_type,
-            n_iter=self.n_iter,
-            random_state=self.random_state,
-        )
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            self.model.fit(arr)
+        best_model = None
+        best_score = -np.inf
+
+        for restart in range(n_restarts):
+            seed = self.random_state + restart
+            model = GaussianHMM(
+                n_components=self.n_states,
+                covariance_type=self.covariance_type,
+                n_iter=self.n_iter,
+                random_state=seed,
+            )
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                model.fit(arr)
+            score = model.score(arr)
+            if score > best_score:
+                best_score = score
+                best_model = model
+
+        self.model = best_model
 
         # Regularize covariance matrices to ensure positive-definiteness
         self._regularize_covars(arr.shape[1])
 
         self._fitted = True
         self._diagnostics = Diagnostics(
-            log_likelihood=self.model.score(arr),
+            log_likelihood=best_score,
             n_iter=self.model.monitor_.iter,
             converged=self.model.monitor_.converged,
             monitor_history=list(self.model.monitor_.history),

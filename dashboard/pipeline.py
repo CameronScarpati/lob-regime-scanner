@@ -151,10 +151,10 @@ def run_pipeline(
     logger.info("Fitting HMM with %d states on %d features ...", hmm_n_states, len(hmm_cols))
     detector = RegimeDetector(
         n_states=hmm_n_states,
-        covariance_type="full",
+        covariance_type="diag",
         labels=REGIME_LABELS,
     )
-    detector.fit(hmm_features)
+    detector.fit(hmm_features, n_restarts=10)
     states = detector.predict(hmm_features)
     state_probs = detector.predict_proba(hmm_features)
     trans_mat = detector.transition_matrix()
