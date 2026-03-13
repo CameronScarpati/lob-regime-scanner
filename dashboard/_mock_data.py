@@ -230,6 +230,24 @@ def generate_cumulative_pnl(
     return np.cumsum(pnl_per_step)
 
 
+def generate_backtest_stats(cumulative_pnl: np.ndarray) -> dict:
+    """Compute summary statistics from cumulative PnL for the statistics bar."""
+    pnl_diff = np.diff(cumulative_pnl, prepend=0)
+    sharpe = float(np.mean(pnl_diff) / max(np.std(pnl_diff), 1e-10) * np.sqrt(252 * 86400))
+    peak = np.maximum.accumulate(cumulative_pnl)
+    drawdown = peak - cumulative_pnl
+    max_dd = float(np.max(drawdown)) if len(drawdown) > 0 else 0.0
+    n_trades = int(np.sum(np.abs(np.diff(np.sign(pnl_diff))) > 0))
+    hit_rate = float(np.mean(pnl_diff[pnl_diff != 0] > 0)) if np.any(pnl_diff != 0) else 0.0
+    return {
+        "sharpe_ratio": round(sharpe, 2),
+        "max_drawdown": round(max_dd, 4),
+        "n_trades": max(n_trades, 1),
+        "hit_rate": round(hit_rate, 3),
+        "total_pnl": round(float(cumulative_pnl[-1]), 4),
+    }
+
+
 def generate_all(
     n_timestamps: int = 3600,
     start: str = "2025-01-15 09:00:00",
@@ -237,7 +255,7 @@ def generate_all(
 ) -> dict:
     """Generate all mock data in one call.
 
-    Returns dict with keys: snapshots, features, hmm, cumulative_pnl.
+    Returns dict with keys: snapshots, features, hmm, cumulative_pnl, backtest_stats.
     """
     hmm = generate_hmm_output(n_timestamps)
     snapshots = generate_snapshots(n_timestamps, start, freq)
@@ -249,4 +267,5 @@ def generate_all(
         "features": features,
         "hmm": hmm,
         "cumulative_pnl": cum_pnl,
+        "backtest_stats": generate_backtest_stats(cum_pnl),
     }

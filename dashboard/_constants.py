@@ -35,16 +35,18 @@ PANEL_DESCRIPTIONS = {
     ),
     "depth_surface": (
         "Three-dimensional view of resting volume (z-axis) across "
-        "price offsets from mid (x-axis) and time (y-axis). Surface "
-        "colour encodes the prevailing regime state."
+        "price offsets from mid (x-axis) and time (y-axis). Bid side "
+        "(green) and ask side (red) are rendered as separate surfaces "
+        "to reveal asymmetric liquidity provision."
     ),
     "diagnostics": (
         "Key microstructure indicators: VPIN (Volume-synchronised "
         "Probability of Informed Trading), OFI (Order Flow Imbalance), "
+        "Kyle's \u03bb (price impact coefficient via rolling OLS), "
         "quoted spread, and cumulative PnL from a regime-aware strategy. "
-        "The strategy enters in the OFI direction on Quiet-to-Trending "
+        "The strategy enters in the OFI direction on Quiet\u2192Trending "
         "transitions and flattens when a Toxic regime is detected. "
-        "Background shading reflects detected regimes."
+        "Coloured dotted lines show regime-conditional means."
     ),
 }
 
