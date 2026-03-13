@@ -373,16 +373,3 @@ pytest>=7.4         # for tests
 6. Zhang, Z., et al. (2019). "DeepLOB: Deep Convolutional Neural Networks for Limit Order Books." IEEE TSP.
 7. Berti, L., et al. (2025). "TLOB: Transformer with Dual Attention for LOB Price Prediction." arXiv: 2502.15757.
 
----
-
-## How to Use This Document with Claude Code
-
-Run `claude` in the project root directory and paste:
-
-```
-Read PROJECT_SPEC.md and help me build this project phase by phase.
-Start with Phase 1: set up the project structure, create requirements.txt,
-and build the Bybit L2 data downloader. Let's begin.
-```
-
-Then iterate phase by phase. Each phase should end with working, tested code before moving to the next.
