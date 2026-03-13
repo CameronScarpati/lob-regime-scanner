@@ -481,10 +481,10 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                             children=dmc.Group(
                                 justify="space-between",
                                 children=[
-                                    # Time range selector (left)
+                                    # Time range selector
                                     dmc.Group(
                                         gap="sm",
-                                        style={"flex": "1", "maxWidth": "700px"},
+                                        style={"flex": "1"},
                                         children=[
                                             dmc.Text(
                                                 "Time Range",
@@ -508,48 +508,6 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                                 color="blue",
                                                 size="sm",
                                                 style={"flex": "1", "minWidth": "300px"},
-                                            ),
-                                        ],
-                                    ),
-                                    # Regime filter chips (right)
-                                    dmc.Group(
-                                        gap="sm",
-                                        children=[
-                                            dmc.Text(
-                                                "Regimes",
-                                                size="xs",
-                                                fw=600,
-                                                c="dimmed",
-                                                tt="uppercase",
-                                                style={"letterSpacing": "0.08em"},
-                                            ),
-                                            dmc.ChipGroup(
-                                                id="regime-chip-group",
-                                                value=["quiet", "trending", "toxic"],
-                                                multiple=True,
-                                                children=[
-                                                    dmc.Chip(
-                                                        "Quiet",
-                                                        value="quiet",
-                                                        color=REGIME_COLORS[0],
-                                                        variant="outline",
-                                                        size="xs",
-                                                    ),
-                                                    dmc.Chip(
-                                                        "Trending",
-                                                        value="trending",
-                                                        color=REGIME_COLORS[1],
-                                                        variant="outline",
-                                                        size="xs",
-                                                    ),
-                                                    dmc.Chip(
-                                                        "Toxic",
-                                                        value="toxic",
-                                                        color=REGIME_COLORS[2],
-                                                        variant="outline",
-                                                        size="xs",
-                                                    ),
-                                                ],
                                             ),
                                         ],
                                     ),
