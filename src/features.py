@@ -205,10 +205,14 @@ def compute_kyles_lambda(
     """
     delta_p = df["mid_price"].diff()
 
-    # Trade sign: +1 for buys, −1 for sells, 0 unknown
-    if "last_trade_side" in df.columns and df["last_trade_side"].notna().any():
-        sign = df["last_trade_side"].map({"buy": 1.0, "sell": -1.0}).fillna(0.0)
-    else:
+    # Trade sign: +1 for buys, −1 for sells; fall back to tick rule
+    sign = pd.Series(0.0, index=df.index)
+    if "last_trade_side" in df.columns:
+        mapped = df["last_trade_side"].map({"buy": 1.0, "sell": -1.0})
+        if mapped.notna().sum() > len(df) * 0.1:
+            sign = mapped.fillna(0.0)
+    # Tick rule fallback when trade-side data is missing or sparse
+    if (sign == 0).all():
         sign = np.sign(delta_p).fillna(0.0)
 
     if "last_trade_qty" in df.columns and df["last_trade_qty"].notna().any():
