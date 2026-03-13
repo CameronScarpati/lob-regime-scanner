@@ -34,10 +34,10 @@ PANEL_DESCRIPTIONS = {
         "of switching between regimes in one time step."
     ),
     "depth_surface": (
-        "Three-dimensional view of resting volume (z-axis) across "
-        "price offsets from mid (x-axis) and time (y-axis). Bid side "
-        "(green) and ask side (red) are rendered as separate surfaces "
-        "to reveal asymmetric liquidity provision."
+        "Gaussian-smoothed 3-D view of resting volume (z-axis) across "
+        "price levels from mid (x-axis) and time (y-axis). Surface "
+        "colour encodes side: green for bids, red for asks — revealing "
+        "asymmetric liquidity provision across the book."
     ),
     "diagnostics": (
         "Key microstructure indicators: VPIN (Volume-synchronised "
