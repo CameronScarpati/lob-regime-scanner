@@ -1,8 +1,7 @@
 """Panel 3: 3D order book depth surface visualization.
 
-Renders a single smoothed 3-D surface (time x price offset x volume)
-with a diverging bid/ask colorscale: green for bids (negative offset),
-red for asks (positive offset).
+Renders a 3-D surface (time x price level x volume) with bid/ask
+sides as separate surfaces in green/red for clean visual separation.
 """
 
 from __future__ import annotations
@@ -18,49 +17,35 @@ from dashboard._constants import PLOTLY_LAYOUT_DEFAULTS
 def _build_depth_grid(
     snapshots: pd.DataFrame,
     n_levels: int = 10,
-    n_time_samples: int = 120,
+    n_time_samples: int = 150,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Build a smoothed volume grid and a side-indicator grid for coloring.
+    """Build bid and ask volume grids.
 
-    Returns (time_indices, price_offsets, volume_grid, side_grid).
-    side_grid encodes bid (-1) vs ask (+1) for the diverging colorscale.
+    Returns (time_indices, level_offsets, bid_grid, ask_grid).
     """
     step = max(1, len(snapshots) // n_time_samples)
     sub = snapshots.iloc[::step].reset_index(drop=True)
     n_t = len(sub)
 
-    # Place bid levels at negative offsets, ask levels at positive offsets,
-    # evenly spaced by level index rather than raw price — avoids degenerate
-    # binning when spreads are tiny relative to level spacing.
-    n_bins = 2 * n_levels
-    price_offsets = np.linspace(-n_levels, n_levels, n_bins)
+    # Level offsets: 1..n_levels for both sides
+    level_offsets = np.arange(1, n_levels + 1, dtype=float)
 
-    volume_grid = np.zeros((n_t, n_bins))
-    side_grid = np.zeros((n_t, n_bins))
+    bid_grid = np.zeros((n_t, n_levels))
+    ask_grid = np.zeros((n_t, n_levels))
 
     for t_idx in range(n_t):
         for lvl in range(1, n_levels + 1):
-            # Bid levels: map to negative offset bins
-            bid_bin = n_levels - lvl  # level 1 -> bin 9, level 10 -> bin 0
-            bv = sub.iloc[t_idx][f"bid_qty_{lvl}"]
-            if 0 <= bid_bin < n_bins:
-                volume_grid[t_idx, bid_bin] += bv
-                side_grid[t_idx, bid_bin] = -1.0
+            bid_grid[t_idx, lvl - 1] = sub.iloc[t_idx][f"bid_qty_{lvl}"]
+            ask_grid[t_idx, lvl - 1] = sub.iloc[t_idx][f"ask_qty_{lvl}"]
 
-            # Ask levels: map to positive offset bins
-            ask_bin = n_levels + lvl - 1  # level 1 -> bin 10, level 10 -> bin 19
-            av = sub.iloc[t_idx][f"ask_qty_{lvl}"]
-            if 0 <= ask_bin < n_bins:
-                volume_grid[t_idx, ask_bin] += av
-                side_grid[t_idx, ask_bin] = 1.0
-
-    # Smooth the volume to remove jaggedness (sigma in time and price dims)
-    sigma_t = max(1.0, n_t / 60)
-    sigma_p = 0.8
-    volume_grid = gaussian_filter(volume_grid, sigma=[sigma_t, sigma_p])
+    # Light smoothing to remove tick noise while preserving structure
+    sigma_t = max(0.8, n_t / 150)
+    sigma_p = 0.5
+    bid_grid = gaussian_filter(bid_grid, sigma=[sigma_t, sigma_p])
+    ask_grid = gaussian_filter(ask_grid, sigma=[sigma_t, sigma_p])
 
     time_indices = np.arange(n_t)
-    return time_indices, price_offsets, volume_grid, side_grid
+    return time_indices, level_offsets, bid_grid, ask_grid
 
 
 def create_depth_surface_figure(
@@ -74,21 +59,40 @@ def create_depth_surface_figure(
     snapshots : DataFrame with book_reconstructor schema.
     regimes : 1-D array of regime labels aligned to snapshots.
     """
-    time_idx, price_offsets, vol_grid, side_grid = _build_depth_grid(snapshots)
+    time_idx, level_offsets, bid_grid, ask_grid = _build_depth_grid(snapshots)
 
-    # Diverging colorscale: green (bids) ← dark center → red (asks)
-    colorscale = [
-        [0.00, "#4CAF82"],  # strong bid (green)
-        [0.35, "#1a3a2e"],  # fading bid
-        [0.50, "#0c1016"],  # neutral center (dark)
-        [0.65, "#3a1a1a"],  # fading ask
-        [1.00, "#EF6C6C"],  # strong ask (red)
+    # Shared lighting for a clean, modern look
+    _lighting = dict(
+        ambient=0.45,
+        diffuse=0.70,
+        specular=0.15,
+        roughness=0.50,
+        fresnel=0.10,
+    )
+    _lightpos = dict(x=-50, y=-200, z=500)
+
+    # Bid colorscale: dark to green
+    bid_colorscale = [
+        [0.00, "rgba(10, 25, 18, 0.85)"],
+        [0.25, "rgba(30, 80, 55, 0.90)"],
+        [0.50, "rgba(50, 140, 90, 0.92)"],
+        [0.75, "rgba(65, 185, 115, 0.95)"],
+        [1.00, "rgba(90, 220, 145, 1.0)"],
+    ]
+
+    # Ask colorscale: dark to red
+    ask_colorscale = [
+        [0.00, "rgba(25, 12, 12, 0.85)"],
+        [0.25, "rgba(80, 30, 30, 0.90)"],
+        [0.50, "rgba(160, 55, 55, 0.92)"],
+        [0.75, "rgba(210, 80, 80, 0.95)"],
+        [1.00, "rgba(240, 110, 110, 1.0)"],
     ]
 
     # Minimal scene axes
     _scene_axis = dict(
         backgroundcolor="rgba(0,0,0,0)",
-        gridcolor="rgba(255,255,255,0.04)",
+        gridcolor="rgba(255,255,255,0.06)",
         showbackground=False,
         tickfont=dict(size=9, color="#5a6575"),
         showspikes=False,
@@ -96,29 +100,51 @@ def create_depth_surface_figure(
 
     fig = go.Figure()
 
+    # Bid surface (negative x-offset to place on the left)
     fig.add_trace(
         go.Surface(
-            x=price_offsets,
+            x=-level_offsets,
             y=time_idx,
-            z=vol_grid,
-            surfacecolor=side_grid,
-            colorscale=colorscale,
-            cmin=-1,
-            cmax=1,
-            opacity=0.92,
+            z=bid_grid,
+            surfacecolor=bid_grid,
+            colorscale=bid_colorscale,
             showscale=False,
-            lighting=dict(
-                ambient=0.55,
-                diffuse=0.65,
-                specular=0.08,
-                roughness=0.70,
-                fresnel=0.05,
+            opacity=0.92,
+            lighting=_lighting,
+            lightposition=_lightpos,
+            contours=dict(
+                z=dict(show=True, color="rgba(76,175,130,0.15)", width=1),
             ),
-            lightposition=dict(x=100, y=200, z=400),
-            contours=dict(z=dict(show=False)),
             hovertemplate=(
-                "Offset: %{x:.1f} levels<br>Time Step: %{y}<br>Volume: %{z:.2f}<extra></extra>"
+                "Bid Level %{x:.0f}<br>"
+                "Time: %{y}<br>"
+                "Volume: %{z:.2f}<extra></extra>"
             ),
+            name="Bids",
+        )
+    )
+
+    # Ask surface (positive x-offset to place on the right)
+    fig.add_trace(
+        go.Surface(
+            x=level_offsets,
+            y=time_idx,
+            z=ask_grid,
+            surfacecolor=ask_grid,
+            colorscale=ask_colorscale,
+            showscale=False,
+            opacity=0.92,
+            lighting=_lighting,
+            lightposition=_lightpos,
+            contours=dict(
+                z=dict(show=True, color="rgba(239,108,108,0.15)", width=1),
+            ),
+            hovertemplate=(
+                "Ask Level %{x:.0f}<br>"
+                "Time: %{y}<br>"
+                "Volume: %{z:.2f}<extra></extra>"
+            ),
+            name="Asks",
         )
     )
 
@@ -129,10 +155,13 @@ def create_depth_surface_figure(
         scene=dict(
             xaxis=dict(
                 title=dict(
-                    text="Price Offset (levels from mid)",
+                    text="\u2190 Bid Levels | Ask Levels \u2192",
                     font=dict(size=10, color="#6b7685"),
                 ),
-                nticks=6,
+                nticks=8,
+                zeroline=True,
+                zerolinecolor="rgba(255,255,255,0.20)",
+                zerolinewidth=1,
                 **_scene_axis,
             ),
             yaxis=dict(
@@ -146,11 +175,11 @@ def create_depth_surface_figure(
                 **_scene_axis,
             ),
             camera=dict(
-                eye=dict(x=1.5, y=-1.5, z=0.65),
+                eye=dict(x=1.6, y=-1.8, z=0.8),
                 up=dict(x=0, y=0, z=1),
             ),
             aspectmode="manual",
-            aspectratio=dict(x=1.2, y=1.5, z=0.6),
+            aspectratio=dict(x=1.3, y=1.6, z=0.55),
         ),
     )
 
