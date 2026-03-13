@@ -14,7 +14,7 @@ import pandas as pd
 
 from src.backtest import run_backtest
 from src.data_loader import load_snapshots_directory
-from src.features import build_feature_matrix, compute_kyles_lambda
+from src.features import HMM_FEATURE_COLS, build_feature_matrix
 from src.hmm_model import REGIME_LABELS, RegimeDetector
 
 logger = logging.getLogger(__name__)
@@ -136,19 +136,27 @@ def run_pipeline(
     logger.info("Loaded %d snapshots", len(snap_df))
 
     # ── Step 2: Compute features ─────────────────────────────────────────
+    # Build raw (un-z-scored) features.  The HMM's internal StandardScaler
+    # handles normalisation; rolling z-score would remove the very
+    # heteroscedasticity the HMM needs to distinguish regimes.
     logger.info("Computing features ...")
-    feature_matrix = build_feature_matrix(snap_df)
+    feature_matrix = build_feature_matrix(snap_df, standardize=False)
+
+    # Select a curated subset for HMM to avoid curse of dimensionality
+    # (30+ features with full covariance → ~1400 params for 3 states).
+    hmm_cols = [c for c in HMM_FEATURE_COLS if c in feature_matrix.columns]
+    hmm_features = feature_matrix[hmm_cols]
 
     # ── Step 3: Fit HMM and decode regimes ───────────────────────────────
-    logger.info("Fitting HMM with %d states ...", hmm_n_states)
+    logger.info("Fitting HMM with %d states on %d features ...", hmm_n_states, len(hmm_cols))
     detector = RegimeDetector(
         n_states=hmm_n_states,
         covariance_type="full",
         labels=REGIME_LABELS,
     )
-    detector.fit(feature_matrix)
-    states = detector.predict(feature_matrix)
-    state_probs = detector.predict_proba(feature_matrix)
+    detector.fit(hmm_features)
+    states = detector.predict(hmm_features)
+    state_probs = detector.predict_proba(hmm_features)
     trans_mat = detector.transition_matrix()
 
     logger.info(
@@ -162,14 +170,11 @@ def run_pipeline(
     mid = snap_df["mid_price"].values
     returns = np.diff(np.log(mid), prepend=np.log(mid[0]))
 
-    # Use the z-scored OFI for directional signal (more robust than raw)
-    ofi_col = next(
-        (c for c in feature_matrix.columns if c.endswith("_zscore") and "ofi" in c),
-        None,
-    )
+    # Use OFI depth-1 for directional signal
+    ofi_col = "ofi_1" if "ofi_1" in feature_matrix.columns else None
     if ofi_col is None:
         ofi_col = next(
-            (c for c in feature_matrix.columns if c.startswith("ofi_") and "_velocity" not in c),
+            (c for c in feature_matrix.columns if c.startswith("ofi_") and "_velocity" not in c and "_zscore" not in c),
             None,
         )
     ofi = feature_matrix[ofi_col].values if ofi_col else np.zeros(len(states))
@@ -189,10 +194,10 @@ def run_pipeline(
     snap_out = snap_df.copy()
     snap_out["timestamp"] = pd.to_datetime(snap_out["timestamp"], unit="us")
 
-    # Build features DataFrame with the column names the dashboard expects
+    # Build features DataFrame with the column names the dashboard expects.
+    # Features are raw (not z-scored) so values have meaningful units.
     feat_out = pd.DataFrame({"timestamp": snap_out["timestamp"].values})
 
-    # Map real feature column names to dashboard expected names
     col_map = {
         "ofi_1": "OFI_1",
         "ofi_5": "OFI_5",
@@ -208,17 +213,13 @@ def run_pipeline(
         "rvol_10s": "realized_vol_10s",
         "rvol_60s": "realized_vol_60s",
         "rvol_300s": "realized_vol_300s",
+        "kyles_lambda": "kyle_lambda",
     }
     for src_col, dst_col in col_map.items():
         if src_col in feature_matrix.columns:
             feat_out[dst_col] = feature_matrix[src_col].values
         else:
             feat_out[dst_col] = 0.0
-
-    # Compute raw (non-z-scored) Kyle's lambda for interpretable display
-    raw_kyle = compute_kyles_lambda(snap_df)
-    raw_kyle = raw_kyle.replace([np.inf, -np.inf], np.nan).ffill().bfill().fillna(0.0)
-    feat_out["kyle_lambda"] = raw_kyle.values
 
     return {
         "snapshots": snap_out,
