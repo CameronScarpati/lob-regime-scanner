@@ -182,12 +182,10 @@ class TestDepthSurfacePanel:
         fig = create_depth_surface_figure(data["snapshots"], data["hmm"]["states"])
         assert isinstance(fig, go.Figure)
 
-    def test_has_bid_and_ask_surfaces(self, data):
+    def test_has_surface_trace(self, data):
         fig = create_depth_surface_figure(data["snapshots"], data["hmm"]["states"])
-        # Two surfaces: bid + ask
-        assert len(fig.data) == 2
+        assert len(fig.data) == 1
         assert isinstance(fig.data[0], go.Surface)
-        assert isinstance(fig.data[1], go.Surface)
 
 
 class TestDiagnosticsPanel:
@@ -210,9 +208,7 @@ class TestDiagnosticsPanel:
 
     def test_four_traces_without_kyle(self, data):
         features = data["features"].drop(columns=["kyle_lambda"])
-        fig = create_diagnostics_figure(
-            features, data["hmm"]["states"], data["cumulative_pnl"]
-        )
+        fig = create_diagnostics_figure(features, data["hmm"]["states"], data["cumulative_pnl"])
         # VPIN + OFI + Spread + PnL = 4 scatter traces
         assert len(fig.data) == 4
 
