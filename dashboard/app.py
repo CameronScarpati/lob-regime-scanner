@@ -20,7 +20,7 @@ import dash_mantine_components as dmc
 import numpy as np
 from dash import Dash, dcc
 
-from dashboard._constants import PANEL_DESCRIPTIONS, REGIME_COLORS
+from dashboard._constants import PANEL_DESCRIPTIONS, REGIME_COLORS, REGIME_NAMES
 from dashboard.callbacks import register_callbacks
 from dashboard.components.depth_surface import create_depth_surface_figure
 from dashboard.components.diagnostics import create_diagnostics_figure
@@ -54,6 +54,42 @@ def _make_panel(title: str, description: str, graph_id: str, figure, config: dic
             dcc.Graph(id=graph_id, figure=figure, config=config),
         ],
     )
+
+
+def _make_stat_item(label: str, value: str, color: str = "dimmed"):
+    """Build a single statistic display for the summary bar."""
+    return dmc.Stack(
+        gap=0,
+        align="center",
+        children=[
+            dmc.Text(value, fw=700, size="lg", c=color, ff="monospace"),
+            dmc.Text(
+                label,
+                size="xs",
+                c="dimmed",
+                tt="uppercase",
+                style={"letterSpacing": "0.06em"},
+            ),
+        ],
+    )
+
+
+def _compute_regime_durations(states: np.ndarray) -> dict[int, float]:
+    """Compute mean regime duration in time steps."""
+    durations: dict[int, list[int]] = {0: [], 1: [], 2: []}
+    if len(states) == 0:
+        return {0: 0.0, 1: 0.0, 2: 0.0}
+    current = states[0]
+    length = 1
+    for s in states[1:]:
+        if s == current:
+            length += 1
+        else:
+            durations[int(current)].append(length)
+            current = s
+            length = 1
+    durations[int(current)].append(length)
+    return {k: (np.mean(v) if v else 0.0) for k, v in durations.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +157,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def load_data(args: argparse.Namespace) -> dict:
     """Load data from the real pipeline or fall back to mock data.
 
-    Returns the standard dict with keys: snapshots, features, hmm, cumulative_pnl.
+    Returns the standard dict with keys: snapshots, features, hmm, cumulative_pnl,
+    backtest_stats.
     """
     if args.demo:
         logger.info("Running in demo mode with synthetic data")
@@ -168,6 +205,7 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
     feat = data["features"]
     hmm = data["hmm"]
     pnl = data["cumulative_pnl"]
+    bt_stats = data.get("backtest_stats", {})
 
     # Build initial figures
     init_heatmap = create_heatmap_figure(snap, hmm["states"])
@@ -181,7 +219,7 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
     if args.demo:
         source_label = "Mock / Synthetic"
     else:
-        source_label = f"Live ({args.symbol})"
+        source_label = f"Tardis ({args.symbol})"
 
     date_label = ""
     if args.start and args.end:
@@ -202,6 +240,16 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
         {"value": int(idx), "label": str(timestamps.iloc[idx].strftime("%H:%M:%S"))}
         for idx in mark_indices
     ]
+
+    # Regime duration statistics
+    regime_durs = _compute_regime_durations(hmm["states"])
+
+    # Backtest statistics (with safe defaults)
+    sharpe = bt_stats.get("sharpe_ratio", 0.0)
+    max_dd = bt_stats.get("max_drawdown", 0.0)
+    n_trades = bt_stats.get("n_trades", 0)
+    hit_rate = bt_stats.get("hit_rate", 0.0)
+    total_pnl = bt_stats.get("total_pnl", 0.0)
 
     # Build app
     dash_app = Dash(
@@ -281,7 +329,7 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                                 children=[
                                                     dmc.Badge("Model", size="xs", variant="light"),
                                                     dmc.Text(
-                                                        "GaussianHMM (3 states)",
+                                                        "GaussianHMM (K=3, full cov)",
                                                         size="sm",
                                                         c="dimmed",
                                                     ),
@@ -307,6 +355,117 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                                     dmc.Text(source_label, size="sm", c="dimmed"),
                                                 ],
                                             ),
+                                        ],
+                                    ),
+                                ],
+                            ),
+                        ),
+                        # -- Strategy Performance Summary --
+                        dmc.Paper(
+                            radius="md",
+                            withBorder=True,
+                            p="sm",
+                            px="lg",
+                            children=dmc.Group(
+                                justify="space-between",
+                                children=[
+                                    dmc.Group(
+                                        gap=4,
+                                        children=[
+                                            dmc.Text(
+                                                "Strategy Performance",
+                                                size="xs",
+                                                fw=600,
+                                                c="dimmed",
+                                                tt="uppercase",
+                                                style={"letterSpacing": "0.08em"},
+                                            ),
+                                            dmc.Text(
+                                                "(Regime-conditional: enter Quiet\u2192Trending, "
+                                                "flatten on Toxic)",
+                                                size="xs",
+                                                c="dimmed",
+                                            ),
+                                        ],
+                                    ),
+                                    dmc.Group(
+                                        gap="xl",
+                                        children=[
+                                            _make_stat_item(
+                                                "Sharpe (ann.)",
+                                                f"{sharpe:.2f}",
+                                                "#4CAF82" if sharpe > 0 else "#EF6C6C",
+                                            ),
+                                            dmc.Divider(
+                                                orientation="vertical",
+                                                color="dark.4",
+                                                size="sm",
+                                            ),
+                                            _make_stat_item(
+                                                "Max Drawdown",
+                                                f"{max_dd:.2%}",
+                                                "#EF6C6C",
+                                            ),
+                                            dmc.Divider(
+                                                orientation="vertical",
+                                                color="dark.4",
+                                                size="sm",
+                                            ),
+                                            _make_stat_item(
+                                                "Trades",
+                                                str(n_trades),
+                                            ),
+                                            dmc.Divider(
+                                                orientation="vertical",
+                                                color="dark.4",
+                                                size="sm",
+                                            ),
+                                            _make_stat_item(
+                                                "Hit Rate",
+                                                f"{hit_rate:.1%}",
+                                                "#4CAF82" if hit_rate > 0.5 else "#E6A817",
+                                            ),
+                                            dmc.Divider(
+                                                orientation="vertical",
+                                                color="dark.4",
+                                                size="sm",
+                                            ),
+                                            _make_stat_item(
+                                                "Total PnL",
+                                                f"{total_pnl:+.4f}",
+                                                "#4CAF82" if total_pnl > 0 else "#EF6C6C",
+                                            ),
+                                            dmc.Divider(
+                                                orientation="vertical",
+                                                color="dark.4",
+                                                size="sm",
+                                            ),
+                                            # Regime duration stats
+                                            *[
+                                                dmc.Stack(
+                                                    gap=0,
+                                                    align="center",
+                                                    children=[
+                                                        dmc.Text(
+                                                            f"{regime_durs[i]:.0f}s",
+                                                            fw=700,
+                                                            size="lg",
+                                                            c=REGIME_COLORS[i],
+                                                            ff="monospace",
+                                                        ),
+                                                        dmc.Text(
+                                                            f"Avg {REGIME_NAMES[i]}",
+                                                            size="xs",
+                                                            c="dimmed",
+                                                            tt="uppercase",
+                                                            style={
+                                                                "letterSpacing": "0.06em",
+                                                            },
+                                                        ),
+                                                    ],
+                                                )
+                                                for i in range(3)
+                                            ],
                                         ],
                                     ),
                                 ],
@@ -435,6 +594,53 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                     {"displayModeBar": "hover"},
                                 ),
                             ],
+                        ),
+                        # -- Footer --
+                        dmc.Paper(
+                            radius="md",
+                            withBorder=True,
+                            p="xs",
+                            px="lg",
+                            children=dmc.Group(
+                                justify="space-between",
+                                children=[
+                                    dmc.Group(
+                                        gap="xs",
+                                        children=[
+                                            dmc.Text(
+                                                "LOB Regime Scanner",
+                                                size="xs",
+                                                fw=600,
+                                                c="dimmed",
+                                            ),
+                                            dmc.Text(
+                                                "\u00b7",
+                                                size="xs",
+                                                c="dark.3",
+                                            ),
+                                            dmc.Text(
+                                                "Cameron Scarpati",
+                                                size="xs",
+                                                c="dimmed",
+                                            ),
+                                        ],
+                                    ),
+                                    dmc.Text(
+                                        "Gaussian HMM (Baum-Welch EM) "
+                                        "\u00b7 OFI (Cont, Kukanov & Stoikov 2014) "
+                                        "\u00b7 VPIN (Easley, L\u00f3pez de Prado & O'Hara 2012) "
+                                        "\u00b7 Kyle's \u03bb (Kyle 1985)",
+                                        size="xs",
+                                        c="dark.3",
+                                    ),
+                                    dmc.Text(
+                                        f"{n_points:,} observations \u00b7 "
+                                        f"3-state full-covariance HMM",
+                                        size="xs",
+                                        c="dark.3",
+                                    ),
+                                ],
+                            ),
                         ),
                     ],
                 ),
