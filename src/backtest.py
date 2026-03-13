@@ -32,13 +32,14 @@ def run_backtest(
     quiet_state: int = 0,
     trending_state: int = 1,
     toxic_state: int = 2,
-    annualization_factor: float = 252.0 * 6.5 * 3600,
+    annualization_factor: float = 365.0 * 24 * 3600,
 ) -> BacktestResult:
     """Run a simple regime-conditional strategy.
 
     Strategy:
-    - Enter on Quiet -> Trending transition in OFI direction.
-    - Flatten on Toxic detection.
+    - Enter on any transition into Trending in OFI direction.
+    - Hold while Trending persists.
+    - Flatten on Toxic detection or return to Quiet.
 
     Parameters
     ----------
@@ -56,7 +57,7 @@ def run_backtest(
         State label for Toxic/Stressed regime.
     annualization_factor : float
         Factor to annualize Sharpe ratio (default assumes 1s bars,
-        ~252 days * 6.5h * 3600s).
+        crypto 24/7: 365 days * 24h * 3600s).
 
     Returns
     -------
@@ -72,13 +73,18 @@ def run_backtest(
     current_trade_pnl = 0.0
     in_trade = False
 
+    # Smooth OFI over a short window for more reliable signal
+    ofi_smooth = np.convolve(ofi, np.ones(min(20, max(n // 100, 3))), mode="same")
+    norm = np.convolve(np.ones_like(ofi), np.ones(min(20, max(n // 100, 3))), mode="same")
+    ofi_smooth = ofi_smooth / np.where(norm > 0, norm, 1)
+
     for t in range(1, n):
         prev_state = states[t - 1]
         curr_state = states[t]
 
-        # Entry: Quiet -> Trending transition
-        if prev_state == quiet_state and curr_state == trending_state and position == 0.0:
-            position = 1.0 if ofi[t] > 0 else -1.0
+        # Entry: transition into Trending from any non-Toxic state
+        if curr_state == trending_state and position == 0.0 and prev_state != toxic_state:
+            position = 1.0 if ofi_smooth[t] > 0 else -1.0
             in_trade = True
             current_trade_pnl = 0.0
 
