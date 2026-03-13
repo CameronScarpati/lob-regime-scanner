@@ -14,7 +14,7 @@ import pandas as pd
 
 from src.backtest import run_backtest
 from src.data_loader import load_snapshots_directory
-from src.features import build_feature_matrix
+from src.features import build_feature_matrix, compute_kyles_lambda
 from src.hmm_model import REGIME_LABELS, RegimeDetector
 
 logger = logging.getLogger(__name__)
@@ -162,15 +162,16 @@ def run_pipeline(
     mid = snap_df["mid_price"].values
     returns = np.diff(np.log(mid), prepend=np.log(mid[0]))
 
-    # Use the first OFI column available
+    # Use the z-scored OFI for directional signal (more robust than raw)
     ofi_col = next(
-        (
-            c
-            for c in feature_matrix.columns
-            if c.startswith("ofi_") and "_zscore" not in c and "_velocity" not in c
-        ),
+        (c for c in feature_matrix.columns if c.endswith("_zscore") and "ofi" in c),
         None,
     )
+    if ofi_col is None:
+        ofi_col = next(
+            (c for c in feature_matrix.columns if c.startswith("ofi_") and "_velocity" not in c),
+            None,
+        )
     ofi = feature_matrix[ofi_col].values if ofi_col else np.zeros(len(states))
 
     bt = run_backtest(states, returns, ofi)
@@ -201,7 +202,6 @@ def run_pipeline(
         "book_imbalance": "book_imbalance",
         "weighted_mid": "weighted_mid",
         "spread_bps": "spread_bps",
-        "kyles_lambda": "kyle_lambda",
         "trade_aggression": "trade_aggression",
         "cancellation_ratio": "cancel_ratio",
         "rvol_1s": "realized_vol_1s",
@@ -214,6 +214,11 @@ def run_pipeline(
             feat_out[dst_col] = feature_matrix[src_col].values
         else:
             feat_out[dst_col] = 0.0
+
+    # Compute raw (non-z-scored) Kyle's lambda for interpretable display
+    raw_kyle = compute_kyles_lambda(snap_df)
+    raw_kyle = raw_kyle.replace([np.inf, -np.inf], np.nan).ffill().bfill().fillna(0.0)
+    feat_out["kyle_lambda"] = raw_kyle.values
 
     return {
         "snapshots": snap_out,
