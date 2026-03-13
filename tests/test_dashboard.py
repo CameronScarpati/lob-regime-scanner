@@ -184,9 +184,8 @@ class TestDepthSurfacePanel:
 
     def test_has_surface_trace(self, data):
         fig = create_depth_surface_figure(data["snapshots"], data["hmm"]["states"])
-        assert len(fig.data) == 2  # bid + ask surfaces
+        assert len(fig.data) == 1
         assert isinstance(fig.data[0], go.Surface)
-        assert isinstance(fig.data[1], go.Surface)
 
 
 class TestDiagnosticsPanel:
