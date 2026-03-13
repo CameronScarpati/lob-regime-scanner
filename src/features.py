@@ -320,8 +320,9 @@ def build_feature_matrix(
     df: pd.DataFrame,
     zscore_window: int = ZSCORE_WINDOW,
     include_vpin: bool = True,
+    standardize: bool = True,
 ) -> pd.DataFrame:
-    """Assemble all features into a standardised (T, F) matrix.
+    """Assemble all features into a (T, F) matrix.
 
     Parameters
     ----------
@@ -329,10 +330,14 @@ def build_feature_matrix(
          (columns: timestamp, mid_price, spread, bid/ask_price/qty_1..10).
     zscore_window : rolling window for z-score standardisation.
     include_vpin : if True, compute VPIN (can be slow on large data).
+    standardize : if True, apply rolling z-score to all features.  Set to
+        False when the consumer (e.g. HMM) applies its own standardisation;
+        double-normalising removes the heteroscedasticity that the HMM needs
+        to distinguish regimes.
 
     Returns
     -------
-    DataFrame of shape (T, F) with all features z-score standardised.
+    DataFrame of shape (T, F) with all computed features.
     """
     parts: list[pd.DataFrame | pd.Series] = []
 
@@ -375,13 +380,13 @@ def build_feature_matrix(
     # Concatenate
     features = pd.concat(parts, axis=1)
 
-    # ---- Rolling z-score standardisation ----------------------------------
-    # OFI z-scores are already computed; standardise everything else.
-    ofi_zscore_cols = [c for c in features.columns if c.endswith("_zscore")]
-    cols_to_standardise = [c for c in features.columns if c not in ofi_zscore_cols]
+    # ---- Optional rolling z-score standardisation -------------------------
+    if standardize:
+        ofi_zscore_cols = [c for c in features.columns if c.endswith("_zscore")]
+        cols_to_standardise = [c for c in features.columns if c not in ofi_zscore_cols]
 
-    for col in cols_to_standardise:
-        features[col] = _rolling_zscore(features[col], window=zscore_window)
+        for col in cols_to_standardise:
+            features[col] = _rolling_zscore(features[col], window=zscore_window)
 
     # ---- NaN / inf handling -----------------------------------------------
     features.replace([np.inf, -np.inf], np.nan, inplace=True)
@@ -395,3 +400,17 @@ def build_feature_matrix(
         list(features.columns),
     )
     return features
+
+
+# Curated subset of features for HMM regime detection.
+# Keeping this small avoids the curse of dimensionality with full-covariance HMMs.
+HMM_FEATURE_COLS = [
+    "ofi_1",
+    "vpin",
+    "book_imbalance",
+    "spread_bps",
+    "kyles_lambda",
+    "rvol_1s",
+    "rvol_60s",
+    "ret_autocorr_1",
+]

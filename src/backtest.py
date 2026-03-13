@@ -33,13 +33,17 @@ def run_backtest(
     trending_state: int = 1,
     toxic_state: int = 2,
     annualization_factor: float = 365.0 * 24 * 3600,
+    ofi_smooth_window: int = 120,
+    cooldown_bars: int = 30,
+    stop_loss: float = 0.002,
 ) -> BacktestResult:
     """Run a simple regime-conditional strategy.
 
     Strategy:
     - Enter on any transition into Trending in OFI direction.
     - Hold while Trending persists.
-    - Flatten on Toxic detection or return to Quiet.
+    - Flatten on Toxic detection, return to Quiet, or stop-loss.
+    - Wait cooldown_bars after each exit before re-entering.
 
     Parameters
     ----------
@@ -58,6 +62,12 @@ def run_backtest(
     annualization_factor : float
         Factor to annualize Sharpe ratio (default assumes 1s bars,
         crypto 24/7: 365 days * 24h * 3600s).
+    ofi_smooth_window : int
+        EMA-like smoothing window for OFI direction signal.
+    cooldown_bars : int
+        Minimum bars to wait after an exit before re-entering.
+    stop_loss : float
+        Maximum cumulative loss per trade before forced exit.
 
     Returns
     -------
@@ -72,19 +82,30 @@ def run_backtest(
     trades: list[float] = []
     current_trade_pnl = 0.0
     in_trade = False
+    bars_since_exit = cooldown_bars  # start ready to trade
 
-    # Smooth OFI over a short window for more reliable signal
-    ofi_smooth = np.convolve(ofi, np.ones(min(20, max(n // 100, 3))), mode="same")
-    norm = np.convolve(np.ones_like(ofi), np.ones(min(20, max(n // 100, 3))), mode="same")
-    ofi_smooth = ofi_smooth / np.where(norm > 0, norm, 1)
+    # Smooth OFI with EMA for reliable direction signal
+    alpha = 2.0 / (ofi_smooth_window + 1)
+    ofi_ema = np.zeros(n)
+    ofi_ema[0] = ofi[0]
+    for i in range(1, n):
+        ofi_ema[i] = alpha * ofi[i] + (1 - alpha) * ofi_ema[i - 1]
 
     for t in range(1, n):
         prev_state = states[t - 1]
         curr_state = states[t]
 
-        # Entry: transition into Trending from any non-Toxic state
-        if curr_state == trending_state and position == 0.0 and prev_state != toxic_state:
-            position = 1.0 if ofi_smooth[t] > 0 else -1.0
+        if not in_trade:
+            bars_since_exit += 1
+
+        # Entry: transition into Trending, with cooldown respected
+        if (
+            curr_state == trending_state
+            and position == 0.0
+            and prev_state != toxic_state
+            and bars_since_exit >= cooldown_bars
+        ):
+            position = 1.0 if ofi_ema[t] > 0 else -1.0
             in_trade = True
             current_trade_pnl = 0.0
 
@@ -95,21 +116,30 @@ def run_backtest(
             trades.append(current_trade_pnl)
             position = 0.0
             in_trade = False
+            bars_since_exit = 0
             continue
 
-        # Also exit if we go back to Quiet while in a trade
+        # Exit: return to Quiet
         if curr_state == quiet_state and position != 0.0:
             pnl[t] = position * returns[t]
             current_trade_pnl += pnl[t]
             trades.append(current_trade_pnl)
             position = 0.0
             in_trade = False
+            bars_since_exit = 0
             continue
 
         # Accumulate PnL while in position
         if position != 0.0:
             pnl[t] = position * returns[t]
             current_trade_pnl += pnl[t]
+
+            # Stop-loss: exit if cumulative trade loss exceeds threshold
+            if current_trade_pnl < -stop_loss:
+                trades.append(current_trade_pnl)
+                position = 0.0
+                in_trade = False
+                bars_since_exit = 0
 
     # Close any open trade at the end
     if in_trade and position != 0.0:
