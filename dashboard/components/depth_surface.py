@@ -29,10 +29,12 @@ def _build_depth_grid(
     n_t = len(sub)
 
     n_bins = 2 * n_levels
-    price_offsets = np.concatenate([
-        np.arange(-n_levels, 0, dtype=float),
-        np.arange(1, n_levels + 1, dtype=float),
-    ])
+    price_offsets = np.concatenate(
+        [
+            np.arange(-n_levels, 0, dtype=float),
+            np.arange(1, n_levels + 1, dtype=float),
+        ]
+    )
 
     volume_grid = np.zeros((n_t, n_bins))
     side_grid = np.zeros((n_t, n_bins))
@@ -93,11 +95,7 @@ def create_depth_surface_figure(
                 fresnel=0.15,
             ),
             lightposition=dict(x=0, y=0, z=800),
-            hovertemplate=(
-                "Level: %{x:.0f}<br>"
-                "Time: %{y}<br>"
-                "Volume: %{z:.2f}<extra></extra>"
-            ),
+            hovertemplate=("Level: %{x:.0f}<br>Time: %{y}<br>Volume: %{z:.2f}<extra></extra>"),
         )
     )
 
