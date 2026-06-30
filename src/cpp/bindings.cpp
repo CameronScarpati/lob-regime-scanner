@@ -66,8 +66,8 @@ static py::dict py_batch_reconstruct(py::array_t<int64_t> timestamps,
 }
 
 PYBIND11_MODULE(_lob_cpp, m) {
-    m.doc() = "C++ LOB reconstruction engine for high-performance order book "
-              "processing (1M+ updates/sec target)";
+    m.doc() = "C++ LOB reconstruction engine for high-throughput order book "
+              "processing (throughput is a design aim, not a benchmarked figure)";
 
     py::class_<LOBEngine>(m, "LOBEngine")
         .def(py::init<>())

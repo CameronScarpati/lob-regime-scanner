@@ -1,131 +1,116 @@
 # Results
 
-Key findings from the LOB Regime Scanner applied to BTCUSDT perpetual futures order book data. Results are presented for a 3-state Gaussian HMM fitted on ~15 microstructure features derived from Bybit Level 2 snapshots at 1-second resolution.
+This document summarizes what the LOB Regime Scanner produces when run on the
+synthetic and free sample data included with the project. Everything here is
+qualitative and illustrative. None of it has been validated on a held-out
+real-market sample, the backtest is in-sample, and the standardization step
+carries lookahead. Read the **Scope and Limitations** section of the README
+before reading anything quantitative into these notes.
 
 ---
 
-## 1. Model Selection: Three Regimes Are Optimal
+## 1. Model Selection
 
-BIC/AIC comparison across *K* ∈ {2, 3, 4, 5} states consistently selects **K = 3** as the optimal number of regimes. The BIC curve shows a sharp improvement from *K* = 2 to *K* = 3, with marginal or negative improvement beyond *K* = 3, indicating that additional states overfit the data rather than capturing new structure.
+A BIC/AIC sweep over *K* ∈ {2, 3, 4, 5} states is implemented (`select_model` in
+`src/hmm_model.py`). The default pipeline uses **K = 3**, chosen for
+interpretability: three states map naturally onto a calm / directional /
+stressed reading of the order book, and adding states tends to split existing
+regimes rather than reveal new structure. K = 3 is a modeling choice, not a
+claim that three is provably optimal on any particular dataset.
 
-| States | BIC (relative) | AIC (relative) | Log-likelihood |
-|--------|----------------|----------------|----------------|
-| 2 | +12.4% | +8.7% | baseline |
-| **3** | **0% (best)** | **0% (best)** | +6.2% |
-| 4 | +3.1% | −0.4% | +7.8% |
-| 5 | +8.9% | +1.2% | +8.4% |
-
-The 3-state model converges in ~50–80 EM iterations, with log-likelihood plateauing well before the 200-iteration cap. Multiple random initializations yield consistent state decompositions, suggesting the solution is robust.
-
----
-
-## 2. Regime-Conditional Volatility Ratios
-
-The three regimes exhibit dramatically different return distributions, validating that the HMM captures economically meaningful structure rather than statistical artifacts.
-
-| Metric | Quiet (State 0) | Trending (State 1) | Toxic (State 2) | Toxic/Quiet Ratio |
-|--------|------------------|---------------------|-------------------|--------------------|
-| Realized vol (1s) | 0.010% | 0.022% | 0.041% | **4.1x** |
-| Realized vol (60s) | 0.08% | 0.18% | 0.33% | **4.1x** |
-| Spread (bps) | 1.2–1.8 | 2.0–3.0 | 4.0–6.0 | **3.3x** |
-| Return autocorr (lag 1) | ≈ 0 | +0.08 to +0.15 | −0.10 to −0.20 | sign flip |
-| Return skewness | ≈ 0 | slightly positive | negative | — |
-| Return kurtosis | ~3 (normal) | ~4 | ~6–8 (fat tails) | **2x+** |
-
-**Key insight:** The Toxic regime exhibits ~4x the volatility of the Quiet regime across all measurement horizons. The sign flip in return autocorrelation — positive in Trending (momentum), negative in Toxic (mean-reversion) — is particularly notable: it implies that the optimal trading strategy differs qualitatively by regime, not just in position sizing.
+The 3-state model typically converges well within the 200-iteration EM cap, and
+multiple random restarts land on consistent state decompositions on the sample
+data.
 
 ---
 
-## 3. VPIN as a Leading Indicator of Regime Transitions
+## 2. Regime Characteristics
 
-VPIN (Volume-Synchronized Probability of Informed Trading) shows systematic behavior around regime transitions:
+After fitting, the three states are sorted by covariance trace (a variance
+proxy) and labeled Quiet, Trending, and Toxic. On the synthetic and sample data
+they separate along intuitive lines:
 
-| Regime | Mean VPIN | Std VPIN | 90th percentile |
-|--------|-----------|----------|-----------------|
-| Quiet | 0.22–0.28 | 0.06 | 0.32 |
-| Trending | 0.35–0.42 | 0.08 | 0.50 |
-| Toxic | 0.60–0.75 | 0.10 | 0.85 |
+- **Quiet** — lowest variance: tighter spreads, balanced order flow, near-zero
+  return autocorrelation.
+- **Trending** — moderate variance: directional order flow imbalance and
+  positive short-horizon return autocorrelation, a momentum signature.
+- **Toxic** — highest variance: wider spreads, elevated VPIN, and negative
+  return autocorrelation, a mean-reversion signature.
 
-**Leading indicator property:** VPIN begins rising 30–120 seconds *before* the HMM transitions from Quiet/Trending to Toxic. This temporal lead is consistent with the theoretical framework of Easley, López de Prado & O'Hara (2012): informed order flow generates elevated VPIN before the price impact fully materializes and volatility spikes. The implication for market makers is that VPIN can serve as an early-warning signal to widen quotes or reduce inventory before adverse selection intensifies.
-
----
-
-## 4. Kyle's Lambda by Regime
-
-Kyle's lambda — the price impact coefficient from the regression ΔP = λ · sign(trade) · √|volume| — varies substantially across regimes:
-
-| Regime | Mean λ | Std λ | Interpretation |
-|--------|--------|-------|----------------|
-| Quiet | 0.008–0.012 | 0.004 | Low adverse selection; market makers face minimal informed flow |
-| Trending | 0.018–0.025 | 0.008 | Moderate impact; directional flow increases execution costs |
-| Toxic | 0.040–0.060 | 0.015 | High adverse selection; informed traders dominate |
-
-The **2–3x elevation in Kyle's lambda during Toxic regimes** is consistent with the Kyle (1985) model's prediction that price impact increases with the fraction of informed trading. This finding has direct implications for optimal execution: a TWAP strategy that ignores regime state will face systematically higher costs during Toxic periods, while a regime-aware strategy could pause execution until the market returns to Quiet.
+The *direction* of these differences is the point, not any specific magnitude.
+The exact values depend entirely on the data fed in, and the synthetic generator
+is tuned to produce regime-like behavior, so the separation should be read as
+"the model recovers the structure built into the synthetic data," not as a
+measured property of real markets.
 
 ---
 
-## 5. Regime Transition Dynamics
+## 3. VPIN and Kyle's Lambda by Regime
 
-The learned transition matrix reveals characteristic persistence and asymmetry:
+VPIN (volume-synchronized probability of informed trading) and Kyle's lambda (a
+rolling price-impact estimate) are computed as additional microstructure
+features. On the sample data, both tend to run higher in the highest-variance
+(Toxic) state than in the Quiet state, which is the direction adverse-selection
+theory would predict.
 
-```
-                 To:
-             Quiet   Trending  Toxic
-From Quiet   0.96     0.03     0.01
-     Trend   0.05     0.90     0.05
-     Toxic   0.10     0.05     0.85
-```
+Two honest caveats:
 
-**Observations:**
-- **High diagonal dominance:** All regimes are persistent. Quiet is the most stable (96% self-transition probability), consistent with normal market conditions being the baseline.
-- **Asymmetric entry/exit:** The Toxic regime has only a 1% probability of being reached directly from Quiet, but once entered, it persists (85% self-transition). This asymmetry reflects the empirical observation that microstructure stress events build gradually (Quiet > Trending > Toxic) but resolve abruptly (Toxic > Quiet at 10%).
-- **Duration statistics:**
-  - Quiet regime: mean duration ~25 seconds per episode
-  - Trending regime: mean duration ~10 seconds per episode
-  - Toxic regime: mean duration ~7 seconds per episode, but with high variance (fat-tailed distribution of episode lengths)
+- In the default pipeline, trade-side data is usually absent, so VPIN and Kyle's
+  lambda fall back to proxies derived from top-of-book quantities rather than
+  true signed trade flow. They are coarse.
+- Any statement that VPIN "leads" Toxic transitions by a specific number of
+  seconds would be a property of the synthetic data, not a validated empirical
+  finding, so no lead time is claimed here.
 
 ---
 
-## 6. Backtest Validation
+## 4. Regime Transition Dynamics
 
-The regime-conditional strategy validates that detected regimes contain actionable information. The strategy is intentionally simple — enter on Quiet-to-Trending transitions in the OFI direction, exit on Toxic detection:
-
-| Metric | Value |
-|--------|-------|
-| Sharpe ratio (annualized) | 1.8–2.5 |
-| Max drawdown | 0.3–0.8% of notional |
-| Hit rate | 55–62% |
-| Profit per trade | positive (regime-dependent) |
-| Number of trades | varies by session (~20–50 per hour) |
-
-**Caveats:** These results exclude transaction costs, slippage, and market impact of the strategy's own orders. The purpose of the backtest is not to claim a live-tradeable alpha, but to demonstrate that the regime labels carry statistically significant information about future return distributions — a necessary condition for any regime-based risk management or execution system.
+The learned transition matrix is strongly diagonal: each state tends to persist
+rather than flip every step, which is the behavior the HMM's transition
+structure is designed to capture, and the main reason an HMM is preferable to a
+memoryless volatility threshold. Regime durations vary by state, with the
+lowest-variance state generally the most persistent. Specific persistence
+probabilities and durations depend on the data and are not reported as fixed
+numbers.
 
 ---
 
-## 7. Comparison with Simple Threshold Methods
+## 5. Backtest
 
-To validate that the HMM captures structure beyond what simple rules achieve, we compare against a threshold-based regime classification using realized volatility quantiles (low/medium/high):
+A deliberately simple regime-conditional rule is included: enter on a
+Quiet-to-Trending transition in the order-flow direction, flatten on Toxic
+detection. It is a visualization aid, not a strategy.
 
-| Metric | HMM (3-state) | Threshold-based |
-|--------|----------------|-----------------|
-| Regime-conditional vol ratio (high/low) | 4.1x | 2.8x |
-| VPIN separation (high − low regime) | 0.42 | 0.28 |
-| Backtest Sharpe | 1.8–2.5 | 0.8–1.2 |
-| Cross-feature consistency | high (all features align) | moderate (vol only) |
+It is in-sample (the HMM is fit and decoded on the same data, with no train/test
+split), it excludes transaction costs, fees, and slippage, and it realizes PnL
+on the same bar the signal fires. For all of those reasons the Sharpe ratio it
+prints is not a meaningful estimate of tradeable performance and is not
+reproduced here. The purpose of the backtest is to show that the regime labels
+move with returns in a structured way, not to claim alpha.
 
-The HMM consistently outperforms the threshold approach because it jointly models all features and captures temporal dependencies via the transition matrix, whereas threshold methods operate on single features independently and ignore regime persistence dynamics.
+---
+
+## 6. HMM vs a Simple Threshold
+
+The HMM is compared against a memoryless volatility-threshold classifier
+(`compare_threshold_regimes`). The qualitative advantage of the HMM is
+structural: it models the features jointly and builds persistence into the
+transition matrix, so its regimes are more stable over time than a threshold
+that flips on single-feature noise. This is a design argument, supported by the
+comparison utility, rather than a tuned performance number.
 
 ---
 
 ## Summary
 
-The Gaussian HMM identifies three economically interpretable regimes in BTCUSDT order book data: Quiet (low vol, balanced flow), Trending (directional OFI, momentum), and Toxic (high vol, informed flow, mean-reversion). The regime decomposition is supported by:
+On synthetic and sample order book data, the Gaussian HMM recovers three
+interpretable states (Quiet, Trending, Toxic) that differ in volatility, spread,
+and return autocorrelation in the directions microstructure intuition would
+predict. The project demonstrates the mechanics end to end: feature
+construction, HMM fitting and Viterbi decoding, regime-conditional analysis, and
+an interactive dashboard.
 
-1. **Model selection:** BIC unambiguously selects 3 states
-2. **Volatility separation:** 4x vol ratio between Toxic and Quiet
-3. **Leading indicators:** VPIN rises 30–120s before Toxic transitions
-4. **Price impact:** Kyle's lambda 2–3x higher in Toxic (adverse selection)
-5. **Actionable signals:** Regime-conditional strategy achieves Sharpe > 1.8
-6. **Superiority over thresholds:** Joint feature modeling captures more structure
-
-These findings demonstrate that hidden-state inference — the same core methodology underlying the DevStats academic integrity system — transfers directly to quantitative finance: detecting latent market microstructure regimes from noisy, high-dimensional order book signals.
+It is a learning project. The regimes have not been validated on real market
+data, the backtest is in-sample with no costs, and the numbers it produces
+should not be read as evidence of a tradeable signal.
