@@ -1,5 +1,13 @@
 # LOB Regime Scanner: Hidden-State Inference for Market Microstructure
 
+> **Note:** This document is the original project brief, the intended plan written
+> before and during the build. It is not a record of validated results. Where the
+> as-built implementation differs from this plan (it uses a global scaler rather
+> than rolling standardization, diagonal rather than full covariance, and is
+> evaluated in-sample with no train/test split), the README and
+> `docs/methodology.md` describe what the code actually does and list the
+> limitations. Treat any performance language below as a design aim, not a claim.
+
 ## Project Brief
 
 Build an end-to-end market microstructure analytics platform that ingests limit order book (LOB) data, computes order flow features, detects hidden market regimes using a Hidden Markov Model, and renders everything in an interactive multi-panel dashboard. The project demonstrates the same core skill — inferring hidden states from noisy signals — that I used in my undergraduate research (DevStats, a CRA award-winning academic integrity system), applied to the domain of quantitative finance.
@@ -128,7 +136,7 @@ Compute the following at each resampled timestamp:
 
 ### 2.4 Feature Matrix Assembly
 
-Stack all features into a matrix `X` of shape `(T, F)` where T = number of timestamps and F = number of features. Standardize each feature to zero mean, unit variance using a **rolling window** (not global, to avoid lookahead bias). Handle NaN/inf values from early-window periods.
+Stack all features into a matrix `X` of shape `(T, F)` where T = number of timestamps and F = number of features. The plan was to standardize each feature to zero mean, unit variance using a **rolling window** (not global, to avoid lookahead bias). As built, the default pipeline instead applies a single global scaler at HMM fit time, which carries lookahead; this is documented as a limitation in `docs/methodology.md` (Section 1.5). Handle NaN/inf values from early-window periods.
 
 ---
 
@@ -150,7 +158,7 @@ from hmmlearn import GaussianHMM
 
 model = GaussianHMM(
     n_components=3,         # number of hidden states
-    covariance_type="full",  # full covariance between features
+    covariance_type="full",  # planned; the as-built default uses "diag"
     n_iter=200,
     random_state=42,
     verbose=True
@@ -166,6 +174,11 @@ states = model.predict(X_test)
 state_probs = model.predict_proba(X_test)
 ```
 
+> As built, the pipeline uses `covariance_type="diag"` and fits and decodes on the
+> same data (no train/test split). The train/test snippet above is the intended
+> design, not what the current code does. See `docs/methodology.md` Sections 2.2
+> and 4.1.
+
 ### 3.2 Regime-Conditional Analysis
 
 After decoding regimes, compute:
@@ -176,7 +189,7 @@ After decoding regimes, compute:
 
 ### 3.3 Simple Regime-Conditional Trading Signal
 
-Backtest a minimal strategy to demonstrate the regime detection has alpha:
+Backtest a minimal strategy to check whether the detected regimes carry information about forward returns (in-sample, no costs):
 - When the model detects a transition from Quiet-to-Trending, enter a position in the direction of OFI
 - When the model detects Toxic/Stressed, flatten all positions
 - Compute Sharpe ratio, max drawdown, hit rate, and profit per trade
@@ -314,19 +327,22 @@ The README is the first thing a recruiter sees. It should include:
 5. Architecture diagram
 6. Links to notebooks with detailed analysis
 
-### 5.2 Key Findings to Highlight
+### 5.2 What to Highlight (honestly)
 
-Frame results around questions a Two Sigma researcher would care about:
-1. "The HMM identifies 3 distinct regimes that correspond to empirically different return distributions — the toxic regime has 4x the volatility of the quiet regime and negative return autocorrelation (mean-reversion), while the trending regime shows positive autocorrelation (momentum)"
-2. "VPIN spikes systematically precede regime transitions to the toxic state by 30-120 seconds, suggesting order flow toxicity is a leading indicator of microstructure stress"
-3. "Price impact (Kyle's lambda) is 2-3x higher in the toxic regime, consistent with adverse selection theory — market makers face higher costs when informed traders dominate flow"
+The interesting story is qualitative and should be framed as behavior observed on synthetic and sample data, not as validated empirical findings. Do not attach precise magnitudes (volatility ratios, VPIN lead times, lambda multiples) that the project cannot reproduce on real data. Honest framing:
+
+1. The HMM separates the data into three interpretable states (Quiet, Trending, Toxic) that differ in volatility, spread, and return autocorrelation in the directions microstructure intuition predicts.
+2. VPIN and Kyle's lambda tend to run higher in the highest-variance state, the direction adverse-selection theory predicts. These are coarse, proxy-based, and not validated on real flow.
+3. The HMM's transition matrix builds in persistence, so its regimes are more stable than a memoryless volatility threshold. This is a structural advantage, argued rather than tuned.
+
+Every quantitative statement should carry the in-sample / synthetic-data / no-cost caveats from the README's Scope and Limitations section.
 
 ### 5.3 Methodology Document
 
 Write a 2-3 page methodology document covering:
 - Mathematical formulation of OFI, VPIN, and the Gaussian HMM
 - Model selection (BIC/AIC comparison)
-- Backtesting methodology (walk-forward, no lookahead)
+- Backtesting methodology (in-sample; the lookahead at standardization and the absence of a train/test split are documented as limitations)
 - Limitations and future work
 
 ---

@@ -1,6 +1,7 @@
 // LOB Reconstruction Engine — Header
-// High-performance order book reconstructor using sorted price-level maps.
-// Target: 1M+ updates/second.
+// Order book reconstructor using sorted price-level maps.
+// Designed for high-throughput reconstruction; throughput is a design aim,
+// not a benchmarked figure.
 
 #ifndef LOB_ENGINE_HPP
 #define LOB_ENGINE_HPP

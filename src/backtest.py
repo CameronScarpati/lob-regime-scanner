@@ -1,7 +1,9 @@
-"""Simple regime-conditional trading strategy backtest.
+"""Simple regime-conditional strategy backtest.
 
-Validates that detected regimes contain actionable information by
-computing Sharpe ratio, max drawdown, hit rate, and profit per trade.
+Computes Sharpe ratio, max drawdown, hit rate, and profit per trade for a
+simple regime-conditional rule, to visualize how the detected regimes behave
+over time. It is in-sample and illustrative (no transaction costs, same-bar
+execution) and is not evidence of a tradeable edge.
 """
 
 from __future__ import annotations

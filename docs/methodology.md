@@ -1,6 +1,6 @@
 # Methodology
 
-This document describes the mathematical formulation of the microstructure features, the Hidden Markov Model regime detection framework, model selection criteria, backtesting methodology, and known limitations.
+This document describes the mathematical formulation of the microstructure features, the Hidden Markov Model regime detection framework, model selection criteria, backtesting methodology, and known limitations. This is a learning project: where the implemented pipeline differs from the textbook formulation (the OFI proxy, global standardization, diagonal covariance, in-sample evaluation), the difference is called out explicitly rather than glossed over. See Section 5 for the consolidated limitations.
 
 ---
 
@@ -8,13 +8,15 @@ This document describes the mathematical formulation of the microstructure featu
 
 ### 1.1 Order Flow Imbalance (OFI)
 
-OFI measures the net change in resting liquidity across the top levels of the limit order book. Following Cont, Kukanov & Stoikov (2014), we define the multi-level OFI at time *t* and depth *d* as:
+OFI measures the net change in resting liquidity across the top levels of the limit order book. Inspired by Cont, Kukanov & Stoikov (2014), we use a **simplified multi-level OFI proxy** at time *t* and depth *d*:
 
 ```
 OFI_t^(d) = Σ_{i=1}^{d} [ ΔV^{bid}_{t,i} − ΔV^{ask}_{t,i} ]
 ```
 
 where `ΔV^{bid}_{t,i} = V^{bid}_{t,i} − V^{bid}_{t−1,i}` is the change in bid volume at price level *i* from the previous snapshot. A positive OFI indicates net buying pressure (bid liquidity increasing relative to ask liquidity); a negative OFI indicates selling pressure.
+
+This is a coarser quantity than the canonical Cont-Kukanov-Stoikov definition, which conditions each level's contribution on whether the bid/ask price moved up, down, or stayed flat between snapshots. The version used here captures the same intuition (net order-book pressure) without that price-move conditioning.
 
 We compute OFI at depths *d* ∈ {1, 5, 10} to capture both top-of-book and deeper liquidity dynamics. Each OFI series is z-score normalized using a rolling 300-second (5-minute) trailing window to remove level effects and produce a stationary signal suitable for HMM ingestion:
 
@@ -74,7 +76,7 @@ computed over a trailing 300-second window. Higher λ indicates greater adverse 
 
 All features are assembled into a matrix **X** of shape (*T* × *F*), where *T* is the number of timestamps and *F* ≈ 30 features (9 OFI columns at 3 depths × 3 metrics, VPIN, 7 additional features, 4 realized volatility horizons, 10 autocorrelation lags).
 
-Each feature is z-score standardized using a **trailing rolling window** (not global statistics) to prevent lookahead bias. NaN and ±∞ values from early-window periods are forward-filled, back-filled, and then replaced with zero.
+The feature module supports z-score standardization using a **trailing rolling window** (`build_feature_matrix(standardize=True)`). The default dashboard pipeline, however, calls `build_feature_matrix(standardize=False)` and feeds the raw features to the HMM, which applies a single global `StandardScaler` at fit time. That global scaler uses full-sample statistics, so the **default pipeline carries lookahead at the standardization step**. A correct out-of-sample design would standardize with an expanding or trailing window that only uses data up to time *t*. This is a known limitation (Section 5), kept because the focus of the project is the regime-detection mechanics rather than a tradeable signal. NaN and ±∞ values from early-window periods are forward-filled, back-filled, and then replaced with zero.
 
 ---
 
@@ -93,7 +95,7 @@ where:
 - *z_t* ∈ {0, 1, 2} is the hidden state at time *t*
 - **A** is the *K* × *K* transition probability matrix, with *A_{ij}* = P(*z_t* = *j* | *z_{t−1}* = *i*)
 - **μ**_k ∈ ℝ^F is the emission mean for state *k*
-- **Σ**_k ∈ ℝ^{F×F} is the full covariance matrix for state *k*
+- **Σ**_k is the covariance matrix for state *k* (diagonal in the default pipeline; see Section 2.2)
 - **π** = P(*z*₁) is the initial state distribution
 
 The three states are interpreted (post-hoc, after fitting) as:
@@ -119,7 +121,7 @@ Parameters θ = {**π**, **A**, {**μ**_k, **Σ**_k}} are estimated via the Expe
 Σ̂_k = Σ_t γ_t(k) · (x_t − μ̂_k)(x_t − μ̂_k)ᵀ / Σ_t γ_t(k)
 ```
 
-We run EM for up to 200 iterations with convergence tolerance on the log-likelihood. We use `hmmlearn.GaussianHMM` with `covariance_type="full"` to capture feature correlations within each regime.
+We run EM for up to 200 iterations with convergence tolerance on the log-likelihood. The `RegimeDetector` supports any `hmmlearn` covariance type, but the **default dashboard pipeline uses `covariance_type="diag"`**. With a curated 8-feature subset, a full covariance HMM would carry on the order of 100+ free parameters across three states, so diagonal covariance is used to keep the parameter count manageable and the fit stable. Full covariance (Σ_k ∈ ℝ^{F×F}, as written above) is available but is not the default.
 
 ### 2.3 State Decoding
 
@@ -159,20 +161,22 @@ BIC penalizes model complexity more heavily than AIC (via the ln(*T*) term vs. t
 
 ### 3.2 Selection Procedure
 
-For each candidate *K*, we fit the HMM, compute BIC and AIC, and select the *K* that minimizes each criterion. In our experiments on BTCUSDT order book data, BIC consistently selects *K* = 3, providing evidence that three regimes capture the dominant structure without overfitting.
+For each candidate *K*, we fit the HMM, compute BIC and AIC, and select the *K* that minimizes each criterion. The sweep is implemented in `select_model`. The default pipeline uses *K* = 3, chosen for interpretability rather than asserted as provably optimal. On the synthetic and sample data, BIC tends to favor three states, but that is a property of this data and is not claimed as a general result for real markets.
 
 ---
 
 ## 4. Backtesting Methodology
 
-### 4.1 Walk-Forward Design
+### 4.1 In-Sample Design (and what a correct version would change)
 
-The backtest is designed to validate that detected regimes contain economically meaningful information, not as a production trading strategy. The design strictly avoids lookahead bias:
+The backtest exists to visualize that detected regimes move with returns in a structured way, not as a production trading strategy. As currently implemented it is **fully in-sample**, and it does not avoid lookahead:
 
-1. **Training period:** The HMM is fit on the first 70% of the time series.
-2. **Test period:** Regime decoding and trading signals are evaluated on the held-out 30%.
-3. **Rolling z-score normalization** uses only past data (trailing window), not future observations.
-4. **No parameter re-optimization** on test data — the model is fit once on training data.
+1. **No train/test split.** The HMM is fit and decoded on the same data. There is no held-out test period, so any metric is in-sample and could reflect overfitting.
+2. **Global standardization at fit.** The HMM applies one global `StandardScaler` over the whole series (Section 1.5), which uses future observations in the scaling of each point.
+3. **Same-bar execution.** PnL is realized on the same bar the signal fires, with no execution lag.
+4. **No transaction costs** (Section 5.1).
+
+A correct out-of-sample design would: fit the HMM on an earlier training window and evaluate on a later held-out window (or roll this forward), standardize with an expanding or trailing window that only uses data up to time *t*, and lag execution by at least one bar. Implementing this walk-forward design is listed under future work; it is not what the current code does.
 
 ### 4.2 Strategy Logic
 
@@ -191,7 +195,7 @@ The signal exploits regime transitions as entry/exit triggers:
 | Hit rate | Fraction of completed trades with positive PnL |
 | Profit per trade | Mean PnL across all completed trades |
 
-The annualization factor assumes 1-second bars over 252 trading days × 6.5 hours × 3600 seconds. For 24/7 cryptocurrency markets, this is conservative.
+The code annualizes assuming 1-second bars in a 24/7 crypto market (`annualization_factor = 365 × 24 × 3600`). Annualizing a per-second Sharpe over a continuous year inflates the figure heavily, which is one more reason the Sharpe here should be treated as an in-sample diagnostic, not a performance estimate.
 
 ---
 
@@ -199,6 +203,11 @@ The annualization factor assumes 1-second bars over 252 trading days × 6.5 hour
 
 ### 5.1 Known Limitations
 
+- **In-sample evaluation:** The HMM is fit and decoded on the same data with no train/test split, so backtest metrics are in-sample and may reflect overfitting rather than genuine signal (Section 4.1).
+- **Lookahead at standardization:** The default pipeline standardizes features with a global `StandardScaler` at fit time, which uses full-sample statistics (Section 1.5). An expanding or trailing window is the correct fix.
+- **Simplified OFI:** Order flow imbalance is a coarse proxy (change in total bid volume minus change in total ask volume) rather than the price-conditioned Cont-Kukanov-Stoikov definition (Section 1.1).
+- **Curated feature subset, diagonal covariance:** Roughly 30 features are computed, but the HMM uses a curated subset of 8, fit with diagonal covariance (Section 2.2). Off-diagonal feature correlations are not modeled in the default pipeline.
+- **Coarse VPIN / Kyle's lambda inputs:** Without a trade-level feed, both are computed from snapshot proxies rather than true signed trade flow, so they are noisy estimates.
 - **Stationarity assumption:** The Gaussian HMM assumes stationary emission distributions within each regime. In practice, the parameters of each regime may drift over multi-day horizons (e.g., baseline spread levels change with market conditions). Periodic model re-fitting would be needed for production use.
 
 - **Fixed number of states:** While BIC selects *K* = 3, the optimal number of regimes may vary across different market conditions, asset classes, or time horizons. An infinite HMM (Bayesian nonparametric approach) could adaptively determine *K*.

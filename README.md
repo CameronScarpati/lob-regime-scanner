@@ -7,11 +7,12 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?style=flat&logo=cplusplus&logoColor=white)](https://isocpp.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-158_passing-brightgreen?style=flat&logo=pytest&logoColor=white)]()
+[![Tests](https://img.shields.io/badge/Tests-160-brightgreen?style=flat&logo=pytest&logoColor=white)]()
 
-*Detecting latent market microstructure regimes from Level 2 order book data*
-*using Gaussian HMMs, microstructure features (OFI, VPIN, Kyle's &lambda;), and*
-*an interactive four-panel Plotly Dash dashboard.*
+*A learning project exploring latent market microstructure regimes in Level 2*
+*order book data using Gaussian HMMs, microstructure features (OFI, VPIN, Kyle's*
+*&lambda;), and an interactive four-panel Plotly Dash dashboard. Exploratory, not a*
+*production trading signal.*
 
 ---
 
@@ -34,7 +35,7 @@
 
 ## Overview
 
-An end-to-end market microstructure analytics platform that infers **hidden regimes** from noisy, high-dimensional order book signals. The core pipeline:
+An end-to-end pipeline, built as a learning project, that infers **hidden regimes** from noisy order book signals. The core flow:
 
 ```
 Tardis L2 Snapshots ──▸ 30+ Microstructure Features ──▸ Gaussian HMM ──▸ Regime Detection ──▸ Dashboard
@@ -42,69 +43,37 @@ Tardis L2 Snapshots ──▸ 30+ Microstructure Features ──▸ Gaussian HMM
     100ms sampling)        spread, vol, autocorr)          EM fitting)        posteriors)           panels)
 ```
 
-The system identifies **three distinct market regimes** — Quiet, Trending, and Toxic — each with empirically different return distributions, liquidity characteristics, and optimal trading behavior.
+The model separates the data into **three hidden states**, which I label Quiet, Trending, and Toxic by ordering them on variance. On the synthetic and sample data used here they show different volatility and liquidity characteristics. The labels are interpretive, and the separation has not been validated on real market data.
 
 **Author:** Cameron Scarpati
 
 <br>
 
-## Key Findings
+## What the Model Produces
 
-<table>
-<tr>
-<td width="50%">
+After fitting, the three states sort cleanly by variance, and on the synthetic and sample data used here they line up with an intuitive reading of the order book:
 
-### Regime-Conditional Volatility
+- **Quiet** is the lowest-variance state: tighter spreads, balanced order flow, near-zero return autocorrelation.
+- **Trending** sits in the middle: directional order flow imbalance and positive short-horizon return autocorrelation, a momentum signature.
+- **Toxic** is the highest-variance state: wider spreads, elevated VPIN, and negative return autocorrelation, a mean-reversion signature.
 
-The HMM identifies 3 distinct regimes with dramatically different return distributions. The **Toxic regime exhibits ~4x the realized volatility** of the Quiet regime, with return autocorrelation flipping from positive (momentum) to negative (mean-reversion).
+The learned transition matrix is strongly diagonal, so each state tends to persist rather than flip every step. A simple regime-conditional rule (enter on Quiet to Trending in the order-flow direction, flatten on Toxic) is included to visualize how the regimes behave over time.
 
-| Metric | Quiet | Trending | Toxic |
-|--------|:-----:|:--------:|:-----:|
-| Realized Vol (1s) | 0.010% | 0.022% | **0.041%** |
-| Spread (bps) | 1.2–1.8 | 2.0–3.0 | **4.0–6.0** |
-| Return Autocorr | ≈ 0 | +0.12 | **−0.15** |
-| Kurtosis | ~3 | ~4 | **~7** |
+These are qualitative observations on synthetic and sample data, not validated results. Please read **[Scope and Limitations](#scope-and-limitations)** before reading anything quantitative into them.
 
-</td>
-<td width="50%">
-
-### VPIN as a Leading Indicator
-
-VPIN spikes systematically precede regime transitions to the Toxic state by **30–120 seconds**, consistent with Easley, L&oacute;pez de Prado & O'Hara (2012). Kyle's &lambda; is **2–3x higher** in Toxic regimes, confirming elevated adverse selection.
-
-| Regime | VPIN | Kyle's &lambda; |
-|--------|:----:|:----------:|
-| Quiet | 0.22–0.28 | 0.008–0.012 |
-| Trending | 0.35–0.42 | 0.018–0.025 |
-| Toxic | **0.60–0.75** | **0.040–0.060** |
-
-</td>
-</tr>
-</table>
-
-<details>
-<summary><b>Regime Transition Matrix &amp; Backtest Results</b></summary>
 <br>
 
-The learned transition matrix reveals high diagonal dominance — Quiet is the most persistent state (96% self-transition), while Toxic resolves abruptly back to Quiet (10% exit rate):
+## Scope and Limitations
 
-```
-               To:  Quiet   Trending   Toxic
-  From Quiet    │   0.96      0.03      0.01
-  From Trend    │   0.05      0.90      0.05
-  From Toxic    │   0.10      0.05      0.85
-```
+This is a personal learning project for getting hands-on with Hidden Markov Models and order book microstructure. It is exploratory rather than a production trading signal, and the following limitations are deliberate and stated plainly so nothing here is mistaken for a validated result:
 
-A simple regime-conditional strategy (enter on Quiet→Trending, flatten on Toxic) validates the regimes carry actionable information:
-
-| Metric | Value |
-|--------|:-----:|
-| Sharpe Ratio (ann.) | 1.8–2.5 |
-| Max Drawdown | 0.3–0.8% |
-| Hit Rate | 55–62% |
-| HMM vs Threshold Sharpe | **2.1x improvement** |
-
-</details>
+- **No real-market validation.** The regime behavior shown above comes from synthetic and free sample data. None of it has been validated on a held-out real-market sample.
+- **In-sample only.** The HMM is fit and decoded on the same data, with no train/test split, so any backtest number is in-sample and could reflect overfitting rather than signal. There is no out-of-sample claim.
+- **Lookahead at standardization.** The default pipeline feeds raw features to the HMM, which applies one global `StandardScaler` at fit time. That scaler uses full-sample statistics, so the current pipeline carries lookahead at the standardization step. A correct version would use an expanding or trailing window.
+- **Backtest is illustrative.** It excludes transaction costs, fees, and slippage, and realizes PnL on the same bar the signal fires. It exists to visualize regime behavior, not to demonstrate a tradeable edge.
+- **Simplified OFI.** Order flow imbalance here is the change in total bid volume minus the change in total ask volume across the top levels, a coarser proxy than the price-conditioned formulation in Cont, Kukanov & Stoikov (2014).
+- **Curated feature subset, diagonal covariance.** The pipeline computes roughly 30 candidate features but feeds a curated subset of 8 to the HMM, fit with diagonal covariance, to keep the parameter count manageable.
+- **C++ engine is optional and unbenchmarked.** The reconstruction engine is a systems exercise; its throughput target is a design aim, not a measured number.
 
 <br>
 
@@ -127,7 +96,7 @@ A simple regime-conditional strategy (enter on Quiet→Trending, flatten on Toxi
 │                    │  Trade aggression  │  Forward-backward│  │Depth │city   │       │
 │  C++ LOB Engine    │  Cancel ratio      │  posteriors      │  │Surf. │Diag.  │       │
 │  (pybind11, opt.)  │                    │                  │  └──────┴───────┘       │
-│  1M+ updates/sec   │  30+ features      │  BIC/AIC model   │  Synchronized panels    │
+│  high-throughput   │  30+ features      │  BIC/AIC model   │  Synchronized panels    │
 │                    │  Rolling z-score   │  selection       │  Crosshair + slider     │
 │                    │                    │                  │                         │
 └────────────────────┴────────────────────┴──────────────────┴─────────────────────────┘
@@ -140,11 +109,11 @@ A simple regime-conditional strategy (enter on Quiet→Trending, flatten on Toxi
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | **Core** | Python 3.11+, NumPy, Pandas | Feature computation, data pipeline |
-| **Performance** | C++17, pybind11 | LOB reconstruction engine (1M+ updates/sec) |
+| **Performance** | C++17, pybind11 | LOB reconstruction engine (optional, not yet benchmarked) |
 | **Statistics** | hmmlearn, scikit-learn, flowrisk | Gaussian HMM, VPIN computation |
 | **Visualization** | Plotly, Dash, Dash Mantine | Interactive 4-panel dashboard |
-| **Data** | Tardis.dev (direct HTTP) | Professional-grade L2 snapshots, 40+ exchanges |
-| **Testing** | pytest (158 tests) | Full coverage across all modules |
+| **Data** | Tardis.dev (direct HTTP) | Tick-level L2 snapshots, 40+ exchanges |
+| **Testing** | pytest (160 tests) | Unit tests across all modules |
 
 <br>
 
@@ -260,7 +229,7 @@ lob-regime-scanner/
 │   └── generate_realistic.py          Synthetic data generator
 │
 ├── notebooks/                     Analysis notebooks (4)
-├── tests/                         pytest suite (158 tests)
+├── tests/                         pytest suite (160 tests)
 ├── docs/                          Methodology + results writeups
 └── pyproject.toml                 Dependencies & package config
 ```
@@ -282,13 +251,13 @@ lob-regime-scanner/
 
 > For the full mathematical formulation, see [docs/methodology.md](docs/methodology.md).
 
-The pipeline computes **30+ microstructure features** from Level 2 snapshots, fits a **Gaussian Hidden Markov Model**, and decodes regimes via the **Viterbi algorithm**:
+The pipeline computes roughly **30 candidate microstructure features** from Level 2 snapshots, feeds a curated subset to a **Gaussian Hidden Markov Model**, and decodes regimes via the **Viterbi algorithm**:
 
-**Feature Engineering** — Multi-level Order Flow Imbalance (Cont, Kukanov & Stoikov, 2014), VPIN (Easley, L&oacute;pez de Prado & O'Hara, 2012), Kyle's &lambda; via rolling OLS, book imbalance, realized volatility at 4 horizons, return autocorrelation at 10 lags, spread dynamics, trade aggression, and cancellation ratio. All features are z-score normalized using **trailing rolling windows** to prevent lookahead bias.
+**Feature Engineering** — a simplified multi-level order flow imbalance proxy inspired by Cont, Kukanov & Stoikov (2014), VPIN (Easley, L&oacute;pez de Prado & O'Hara, 2012), Kyle's &lambda; via rolling OLS, book imbalance, realized volatility at 4 horizons, return autocorrelation at 10 lags, spread dynamics, trade aggression, and cancellation ratio. The feature module supports trailing-rolling-window z-scoring, but the default pipeline feeds raw features to the HMM, which applies one global `StandardScaler` at fit time. That global scaler uses full-sample statistics, so the current pipeline carries lookahead at the standardization step (see [Scope and Limitations](#scope-and-limitations)).
 
-**HMM Regime Detection** — A 3-state Gaussian HMM with full covariance matrices, fitted via Baum-Welch EM (up to 200 iterations). States are auto-sorted by covariance trace (volatility proxy) for deterministic interpretation. Model selection via BIC/AIC across K &isin; {2, 3, 4, 5} consistently selects K = 3.
+**HMM Regime Detection** — a 3-state Gaussian HMM, fit via Baum-Welch EM (up to 200 iterations) with diagonal covariance in the default pipeline (full covariance is also supported). States are auto-sorted by covariance trace (a volatility proxy) for deterministic labeling. A BIC/AIC sweep over K &isin; {2, 3, 4, 5} is implemented; the default uses K = 3, chosen for interpretability.
 
-**Backtest Validation** — Walk-forward design (70/30 train/test split) with regime-conditional entry/exit: enter on Quiet→Trending transitions in the OFI direction, flatten on Toxic detection. Validates that regimes carry statistically significant information about future return distributions.
+**Backtest** — in-sample by construction: the HMM is fit and decoded on the same data, with no train/test split. A regime-conditional rule (enter on Quiet to Trending in the OFI direction, flatten on Toxic) is applied with no transaction costs and same-bar execution. It exists to visualize regime behavior, not to demonstrate a tradeable edge, and any Sharpe it reports is in-sample only.
 
 <br>
 
@@ -296,7 +265,7 @@ The pipeline computes **30+ microstructure features** from Level 2 snapshots, fi
 
 ```bash
 make install-dev       # Create venv + install all dependencies
-make test              # Run pytest suite (158 tests)
+make test              # Run pytest suite (160 tests)
 make lint              # Run ruff linter
 make format            # Auto-format with ruff
 ```

@@ -329,7 +329,7 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                                 children=[
                                                     dmc.Badge("Model", size="xs", variant="light"),
                                                     dmc.Text(
-                                                        "GaussianHMM (K=3, full cov)",
+                                                        "GaussianHMM (K=3, diag cov)",
                                                         size="sm",
                                                         c="dimmed",
                                                     ),
@@ -382,7 +382,8 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                             ),
                                             dmc.Text(
                                                 "(Regime-conditional: enter Quiet\u2192Trending, "
-                                                "flatten on Toxic)",
+                                                "flatten on Toxic \u00b7 in-sample, no costs, "
+                                                "illustrative)",
                                                 size="xs",
                                                 c="dimmed",
                                             ),
@@ -593,7 +594,7 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                     ),
                                     dmc.Text(
                                         f"{n_points:,} observations \u00b7 "
-                                        f"3-state full-covariance HMM",
+                                        f"3-state diagonal-covariance HMM",
                                         size="xs",
                                         c="dark.3",
                                     ),
