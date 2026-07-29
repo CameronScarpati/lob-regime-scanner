@@ -15,6 +15,7 @@ from src.features import (
     compute_cancellation_ratio,
     compute_kyles_lambda,
     compute_ofi,
+    compute_ofi_cks,
     compute_realized_volatility,
     compute_return_autocorrelation,
     compute_spread_bps,
@@ -141,6 +142,83 @@ class TestOFI:
         assert ofi["ofi_1"].iloc[1] == pytest.approx(2.0)
         # row 2: Δbid=-4, Δask=4 → OFI=-8
         assert ofi["ofi_1"].iloc[2] == pytest.approx(-8.0)
+
+
+# ---------------------------------------------------------------------------
+# Canonical Cont-Kukanov-Stoikov OFI
+# ---------------------------------------------------------------------------
+
+
+def _make_cks_df() -> pd.DataFrame:
+    """Hand-crafted level-1 book states covering every price-move case."""
+    return pd.DataFrame(
+        {
+            "bid_price_1": [100.0, 100.0, 100.5, 100.0, 100.0],
+            "bid_qty_1": [10.0, 12.0, 5.0, 6.0, 6.0],
+            "ask_price_1": [101.0, 101.0, 101.0, 100.8, 101.0],
+            "ask_qty_1": [10.0, 10.0, 8.0, 4.0, 9.0],
+        }
+    )
+
+
+class TestOFICKS:
+    def test_columns_present(self, snapshot_df: pd.DataFrame) -> None:
+        ofi = compute_ofi_cks(snapshot_df)
+        for d in OFI_DEPTHS:
+            assert f"ofi_cks_{d}" in ofi.columns
+            assert f"ofi_cks_{d}_zscore" in ofi.columns
+
+    def test_output_length(self, snapshot_df: pd.DataFrame) -> None:
+        ofi = compute_ofi_cks(snapshot_df)
+        assert len(ofi) == len(snapshot_df)
+
+    def test_first_row_nan(self, snapshot_df: pd.DataFrame) -> None:
+        """No previous book state at the first row."""
+        ofi = compute_ofi_cks(snapshot_df)
+        assert np.isnan(ofi["ofi_cks_1"].iloc[0])
+
+    def test_known_values(self) -> None:
+        """Every price-move branch of the CKS formula, hand-computed."""
+        ofi = compute_ofi_cks(_make_cks_df(), depths=[1])["ofi_cks_1"]
+        # r1: prices unchanged -> net queue changes: (12-10) - (10-10) = 2
+        assert ofi.iloc[1] == pytest.approx(2.0)
+        # r2: bid price up -> +bq_t = 5; ask unchanged -> e_ask = 8-10 = -2
+        # OFI = 5 - (-2) = 7
+        assert ofi.iloc[2] == pytest.approx(7.0)
+        # r3: bid price down -> -bq_prev = -5; ask price down -> e_ask = +4
+        # OFI = -5 - 4 = -9
+        assert ofi.iloc[3] == pytest.approx(-9.0)
+        # r4: bid flat, qty flat -> 0; ask price up -> e_ask = -aq_prev = -4
+        # OFI = 0 + 4 = 4
+        assert ofi.iloc[4] == pytest.approx(4.0)
+
+    def test_differs_from_simple_proxy_on_price_moves(self) -> None:
+        """When a quote price moves, the canonical OFI counts the full
+        queue, while the proxy only sees the net volume delta."""
+        df = _make_cks_df()
+        canonical = compute_ofi_cks(df, depths=[1])["ofi_cks_1"]
+        proxy = compute_ofi(df, depths=[1])["ofi_1"]
+        # r1 (no price move): both reduce to the volume delta
+        assert canonical.iloc[1] == pytest.approx(proxy.iloc[1])
+        # r2 (bid price improvement): they disagree, canonical is positive
+        assert canonical.iloc[2] != pytest.approx(proxy.iloc[2])
+        assert canonical.iloc[2] > 0 > proxy.iloc[2]
+
+    def test_multi_level_sums_levels(self) -> None:
+        df = _make_cks_df()
+        # Duplicate level 1 as level 2 -> depth-2 OFI is exactly double
+        for col in ["bid_price", "bid_qty", "ask_price", "ask_qty"]:
+            df[f"{col}_2"] = df[f"{col}_1"]
+        ofi = compute_ofi_cks(df, depths=[1, 2])
+        np.testing.assert_allclose(ofi["ofi_cks_2"].iloc[1:], 2 * ofi["ofi_cks_1"].iloc[1:])
+
+    def test_nan_qty_treated_as_empty_level(self) -> None:
+        df = _make_cks_df()
+        df.loc[2, "bid_qty_1"] = np.nan
+        ofi = compute_ofi_cks(df, depths=[1])["ofi_cks_1"]
+        # r2: bid price up with NaN qty -> bid contributes 0, ask still -2
+        assert ofi.iloc[2] == pytest.approx(2.0)
+        assert np.isfinite(ofi.iloc[2:]).all()
 
 
 # ---------------------------------------------------------------------------
@@ -371,11 +449,12 @@ class TestBuildFeatureMatrix:
     def test_expected_column_count(self, snapshot_df: pd.DataFrame) -> None:
         fm = build_feature_matrix(snapshot_df, include_vpin=False)
         # OFI: 3 depths × 3 (raw, zscore, velocity) = 9
+        # CKS OFI: 3 depths × 2 (raw, zscore) = 6
         # book_imbalance, weighted_mid, spread_bps, kyles_lambda,
         # trade_aggression, cancellation_ratio = 6
         # rvol: 4 horizons = 4
         # ret_autocorr: 10 lags = 10
-        expected = 9 + 6 + 4 + 10
+        expected = 9 + 6 + 6 + 4 + 10
         assert fm.shape[1] == expected
 
     def test_all_columns_finite(self, snapshot_df: pd.DataFrame) -> None:

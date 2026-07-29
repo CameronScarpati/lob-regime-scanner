@@ -405,6 +405,39 @@ class TestBacktest:
 
 
 # ---------------------------------------------------------------------------
+# Walk-forward fitting (scaler causality)
+# ---------------------------------------------------------------------------
+
+
+class TestWalkForward:
+    """Fitting on a train slice must keep the scaler causal for held-out data."""
+
+    def test_scaler_uses_train_statistics_only(self):
+        X, _ = _make_alternating_regime_data(n_cycles=5, cycle_len=100)
+        split = int(len(X) * 0.7)
+        det = RegimeDetector(n_states=3, n_iter=100, random_state=42)
+        det.fit(X[:split])
+
+        # The internal scaler must carry train-slice statistics, not
+        # full-sample statistics (which would be lookahead).
+        np.testing.assert_allclose(det._scaler.mean_, X[:split].mean(axis=0))
+        assert not np.allclose(det._scaler.mean_, X.mean(axis=0))
+
+    def test_decode_full_series_with_train_fitted_model(self):
+        X, _ = _make_alternating_regime_data(n_cycles=5, cycle_len=100)
+        split = int(len(X) * 0.7)
+        det = RegimeDetector(n_states=3, n_iter=100, random_state=42)
+        det.fit(X[:split])
+
+        states = det.predict(X)
+        probs = det.predict_proba(X)
+        assert states.shape == (len(X),)
+        assert probs.shape == (len(X), 3)
+        # The held-out segment must still be decodable into valid states
+        assert set(np.unique(states[split:])).issubset({0, 1, 2})
+
+
+# ---------------------------------------------------------------------------
 # Integration: HMM + Backtest
 # ---------------------------------------------------------------------------
 
