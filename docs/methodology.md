@@ -1,6 +1,6 @@
 # Methodology
 
-This document describes the mathematical formulation of the microstructure features, the Hidden Markov Model regime detection framework, model selection criteria, backtesting methodology, and known limitations. This is a learning project: where the implemented pipeline differs from the textbook formulation (the OFI proxy, global standardization, diagonal covariance, in-sample evaluation), the difference is called out explicitly rather than glossed over. See Section 5 for the consolidated limitations.
+This document describes the mathematical formulation of the microstructure features, the Hidden Markov Model regime detection framework, model selection criteria, backtesting methodology, and known limitations. This is a learning project: where the implemented pipeline differs from the textbook formulation or from a production-grade design (diagonal covariance, a single 70/30 walk-forward split, stylized fills and costs), the difference is called out explicitly rather than glossed over. See Section 5 for the consolidated limitations.
 
 ---
 
@@ -8,15 +8,26 @@ This document describes the mathematical formulation of the microstructure featu
 
 ### 1.1 Order Flow Imbalance (OFI)
 
-OFI measures the net change in resting liquidity across the top levels of the limit order book. Inspired by Cont, Kukanov & Stoikov (2014), we use a **simplified multi-level OFI proxy** at time *t* and depth *d*:
+OFI measures the net change in resting liquidity across the top levels of the limit order book. Two formulations are implemented:
+
+**Simplified multi-level proxy** (`compute_ofi`) at time *t* and depth *d*:
 
 ```
 OFI_t^(d) = Σ_{i=1}^{d} [ ΔV^{bid}_{t,i} − ΔV^{ask}_{t,i} ]
 ```
 
-where `ΔV^{bid}_{t,i} = V^{bid}_{t,i} − V^{bid}_{t−1,i}` is the change in bid volume at price level *i* from the previous snapshot. A positive OFI indicates net buying pressure (bid liquidity increasing relative to ask liquidity); a negative OFI indicates selling pressure.
+where `ΔV^{bid}_{t,i} = V^{bid}_{t,i} − V^{bid}_{t−1,i}` is the change in bid volume at price level *i* from the previous snapshot. A positive OFI indicates net buying pressure (bid liquidity increasing relative to ask liquidity); a negative OFI indicates selling pressure. This version captures net order-book pressure without price-move conditioning, and is kept for comparison and dashboard display.
 
-This is a coarser quantity than the canonical Cont-Kukanov-Stoikov definition, which conditions each level's contribution on whether the bid/ask price moved up, down, or stayed flat between snapshots. The version used here captures the same intuition (net order-book pressure) without that price-move conditioning.
+**Canonical Cont-Kukanov-Stoikov OFI** (`compute_ofi_cks`), which conditions each level's contribution on the direction of the price move at that level (Cont, Kukanov & Stoikov, 2014):
+
+```
+e^{bid}_{t,i} = V^{bid}_{t,i} · 1{P^{bid}_{t,i} ≥ P^{bid}_{t−1,i}} − V^{bid}_{t−1,i} · 1{P^{bid}_{t,i} ≤ P^{bid}_{t−1,i}}
+e^{ask}_{t,i} = V^{ask}_{t,i} · 1{P^{ask}_{t,i} ≤ P^{ask}_{t−1,i}} − V^{ask}_{t−1,i} · 1{P^{ask}_{t,i} ≥ P^{ask}_{t−1,i}}
+
+OFI_t^(d) = Σ_{i=1}^{d} [ e^{bid}_{t,i} − e^{ask}_{t,i} ]
+```
+
+A bid price improvement counts the entire new queue as buying pressure and a bid price drop counts the vanished queue as selling pressure, while an unchanged price contributes only the net queue change. The paper defines this at the best level; applying it per level and summing is the standard multi-level extension. **The HMM feature set uses the canonical formulation** (`ofi_cks_1`).
 
 We compute OFI at depths *d* ∈ {1, 5, 10} to capture both top-of-book and deeper liquidity dynamics. Each OFI series is z-score normalized using a rolling 300-second (5-minute) trailing window to remove level effects and produce a stationary signal suitable for HMM ingestion:
 
@@ -76,7 +87,7 @@ computed over a trailing 300-second window. Higher λ indicates greater adverse 
 
 All features are assembled into a matrix **X** of shape (*T* × *F*), where *T* is the number of timestamps and *F* ≈ 30 features (9 OFI columns at 3 depths × 3 metrics, VPIN, 7 additional features, 4 realized volatility horizons, 10 autocorrelation lags).
 
-The feature module supports z-score standardization using a **trailing rolling window** (`build_feature_matrix(standardize=True)`). The default dashboard pipeline, however, calls `build_feature_matrix(standardize=False)` and feeds the raw features to the HMM, which applies a single global `StandardScaler` at fit time. That global scaler uses full-sample statistics, so the **default pipeline carries lookahead at the standardization step**. A correct out-of-sample design would standardize with an expanding or trailing window that only uses data up to time *t*. This is a known limitation (Section 5), kept because the focus of the project is the regime-detection mechanics rather than a tradeable signal. NaN and ±∞ values from early-window periods are forward-filled, back-filled, and then replaced with zero.
+The feature module supports z-score standardization using a **trailing rolling window** (`build_feature_matrix(standardize=True)`). The default dashboard pipeline calls `build_feature_matrix(standardize=False)` and feeds the raw features to the HMM, whose `StandardScaler` is **fit on the walk-forward training segment only** (Section 4.1). Held-out rows are therefore scaled with train-segment statistics, never with future data. In the legacy fully in-sample mode (`train_frac=None`) the scaler still sees the whole series, which is lookahead; that mode exists for comparison, not for evaluation. NaN and ±∞ values from early-window periods are forward-filled and any remaining leading NaNs are set to zero — there is deliberately **no backward fill**, which would leak future values into warm-up rows.
 
 ---
 
@@ -167,16 +178,16 @@ For each candidate *K*, we fit the HMM, compute BIC and AIC, and select the *K* 
 
 ## 4. Backtesting Methodology
 
-### 4.1 In-Sample Design (and what a correct version would change)
+### 4.1 Walk-Forward Design
 
-The backtest exists to visualize that detected regimes move with returns in a structured way, not as a production trading strategy. As currently implemented it is **fully in-sample**, and it does not avoid lookahead:
+The backtest exists to visualize that detected regimes move with returns in a structured way, not as a production trading strategy. The default pipeline now implements the standard walk-forward hygiene:
 
-1. **No train/test split.** The HMM is fit and decoded on the same data. There is no held-out test period, so any metric is in-sample and could reflect overfitting.
-2. **Global standardization at fit.** The HMM applies one global `StandardScaler` over the whole series (Section 1.5), which uses future observations in the scaling of each point.
-3. **Same-bar execution.** PnL is realized on the same bar the signal fires, with no execution lag.
-4. **No transaction costs** (Section 5.1).
+1. **Train/test split.** The HMM (including its feature scaler) is fit on the first 70% of the series (`train_frac=0.7`), then decodes the full series. Headline backtest statistics come from the held-out 30%; the in-sample segment's statistics are reported alongside for comparison.
+2. **Causal standardization.** Because the scaler is fit on the training segment only, no held-out observation is scaled using future statistics (Section 1.5).
+3. **Next-bar execution.** The position decided from information at bar *t* is held over bar *t + 1*; a signal never earns the bar it fires on.
+4. **Transaction costs.** Each unit of turnover is charged taker fees plus slippage (defaults: 5.5 + 0.5 bps per side). All headline metrics are net of costs; gross variants are reported alongside.
 
-A correct out-of-sample design would: fit the HMM on an earlier training window and evaluate on a later held-out window (or roll this forward), standardize with an expanding or trailing window that only uses data up to time *t*, and lag execution by at least one bar. Implementing this walk-forward design is listed under future work; it is not what the current code does.
+What this still is not: a robust out-of-sample validation. The sample is a single instrument over a short window, fills are modeled naively (full fill at the next mid, no queue position or market impact), and one 70/30 split is not a rolling re-estimation. Passing `train_frac=None` reproduces the legacy fully in-sample behavior for comparison.
 
 ### 4.2 Strategy Logic
 
@@ -190,12 +201,12 @@ The signal exploits regime transitions as entry/exit triggers:
 
 | Metric | Formula |
 |--------|---------|
-| Sharpe ratio | `(mean(pnl) / std(pnl)) × √(annualization_factor)` |
-| Max drawdown | `max(peak_cumPnL − cumPnL_t)` over all *t* |
-| Hit rate | Fraction of completed trades with positive PnL |
-| Profit per trade | Mean PnL across all completed trades |
+| Sharpe ratio | `(mean(pnl) / std(pnl)) × √(bars_per_year)`, on net-of-cost PnL (gross also reported) |
+| Max drawdown | `max(1 − equity_t / peak_equity_t)` with `equity = exp(cumsum(pnl))` — a fraction of peak equity |
+| Hit rate | Fraction of completed trades with positive net PnL |
+| Profit per trade | Mean net PnL across all completed trades |
 
-The code annualizes assuming 1-second bars in a 24/7 crypto market (`annualization_factor = 365 × 24 × 3600`). Annualizing a per-second Sharpe over a continuous year inflates the figure heavily, which is one more reason the Sharpe here should be treated as an in-sample diagnostic, not a performance estimate.
+`bars_per_year` is computed from the actual bar interval of the input series (the pipeline passes `365 × 24 × 3600 × 10⁶ / sample_interval_us` for a 24/7 crypto market), so a 100ms-sampled run is annualized consistently rather than assuming 1-second bars. Annualizing a sub-second Sharpe over a continuous year still extrapolates heavily, so the figure should be treated as a diagnostic, not a performance estimate.
 
 ---
 
@@ -203,9 +214,8 @@ The code annualizes assuming 1-second bars in a 24/7 crypto market (`annualizati
 
 ### 5.1 Known Limitations
 
-- **In-sample evaluation:** The HMM is fit and decoded on the same data with no train/test split, so backtest metrics are in-sample and may reflect overfitting rather than genuine signal (Section 4.1).
-- **Lookahead at standardization:** The default pipeline standardizes features with a global `StandardScaler` at fit time, which uses full-sample statistics (Section 1.5). An expanding or trailing window is the correct fix.
-- **Simplified OFI:** Order flow imbalance is a coarse proxy (change in total bid volume minus change in total ask volume) rather than the price-conditioned Cont-Kukanov-Stoikov definition (Section 1.1).
+- **One split, short sample:** The walk-forward design (Section 4.1) makes the headline metrics out-of-sample, but a single 70/30 split on a single instrument over a short window is not a robust validation. Rolling re-estimation over longer, more varied samples would be needed before believing any number.
+- **Naive fills:** The backtest assumes a full fill at the next bar's mid plus a fixed slippage assumption. Queue position, partial fills, and market impact are not modeled.
 - **Curated feature subset, diagonal covariance:** Roughly 30 features are computed, but the HMM uses a curated subset of 8, fit with diagonal covariance (Section 2.2). Off-diagonal feature correlations are not modeled in the default pipeline.
 - **Coarse VPIN / Kyle's lambda inputs:** Without a trade-level feed, both are computed from snapshot proxies rather than true signed trade flow, so they are noisy estimates.
 - **Stationarity assumption:** The Gaussian HMM assumes stationary emission distributions within each regime. In practice, the parameters of each regime may drift over multi-day horizons (e.g., baseline spread levels change with market conditions). Periodic model re-fitting would be needed for production use.
@@ -218,7 +228,7 @@ The code annualizes assuming 1-second bars in a 24/7 crypto market (`annualizati
 
 - **Single-asset analysis:** This study focuses on BTCUSDT perpetual futures. Cross-asset regime synchronization (e.g., BTC, ETH, SOL entering Toxic simultaneously) would provide richer market structure insights.
 
-- **Transaction costs:** The backtest does not incorporate realistic transaction costs (spread crossing, fees, slippage). The strategy is intended as a validation tool for regime detection quality, not a P&L forecast.
+- **Stylized transaction costs:** The backtest charges a flat per-side fee plus slippage assumption on every unit of turnover. Real costs vary with spread, order size, and venue tier, so the strategy remains a validation tool for regime detection quality, not a P&L forecast.
 
 ### 5.2 Future Directions
 

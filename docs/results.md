@@ -2,10 +2,11 @@
 
 This document summarizes what the LOB Regime Scanner produces when run on the
 synthetic and free sample data included with the project. Everything here is
-qualitative and illustrative. None of it has been validated on a held-out
-real-market sample, the backtest is in-sample, and the standardization step
-carries lookahead. Read the **Scope and Limitations** section of the README
-before reading anything quantitative into these notes.
+qualitative and illustrative. The default pipeline is walk-forward (fit on the
+first 70%, headline statistics on the held-out 30%, net of costs), but the
+sample is a single instrument over a short window, so nothing here has been
+validated at scale on real market data. Read the **Scope and Limitations**
+section of the README before reading anything quantitative into these notes.
 
 ---
 
@@ -82,12 +83,14 @@ A deliberately simple regime-conditional rule is included: enter on a
 Quiet-to-Trending transition in the order-flow direction, flatten on Toxic
 detection. It is a visualization aid, not a strategy.
 
-It is in-sample (the HMM is fit and decoded on the same data, with no train/test
-split), it excludes transaction costs, fees, and slippage, and it realizes PnL
-on the same bar the signal fires. For all of those reasons the Sharpe ratio it
-prints is not a meaningful estimate of tradeable performance and is not
-reproduced here. The purpose of the backtest is to show that the regime labels
-move with returns in a structured way, not to claim alpha.
+The backtest applies next-bar execution, charges taker fees plus slippage on
+every unit of turnover, annualizes from the actual bar interval, and reports
+its headline statistics on the held-out walk-forward segment (with in-sample
+and gross-of-cost figures alongside). Even so, one 70/30 split on a short
+single-instrument sample with naive fill assumptions is not a validation, so
+no Sharpe ratio is reproduced here. The purpose of the backtest is to show
+that the regime labels move with returns in a structured way, not to claim
+alpha.
 
 ---
 
@@ -111,6 +114,7 @@ predict. The project demonstrates the mechanics end to end: feature
 construction, HMM fitting and Viterbi decoding, regime-conditional analysis, and
 an interactive dashboard.
 
-It is a learning project. The regimes have not been validated on real market
-data, the backtest is in-sample with no costs, and the numbers it produces
-should not be read as evidence of a tradeable signal.
+It is a learning project. The regimes have not been validated at scale on real
+market data, the walk-forward backtest covers one short single-instrument
+sample with stylized fills and costs, and the numbers it produces should not
+be read as evidence of a tradeable signal.

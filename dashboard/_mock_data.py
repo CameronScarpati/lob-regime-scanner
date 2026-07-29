@@ -233,9 +233,11 @@ def generate_cumulative_pnl(
 def generate_backtest_stats(cumulative_pnl: np.ndarray) -> dict:
     """Compute summary statistics from cumulative PnL for the statistics bar."""
     pnl_diff = np.diff(cumulative_pnl, prepend=0)
-    sharpe = float(np.mean(pnl_diff) / max(np.std(pnl_diff), 1e-10) * np.sqrt(252 * 86400))
-    peak = np.maximum.accumulate(cumulative_pnl)
-    drawdown = peak - cumulative_pnl
+    sharpe = float(np.mean(pnl_diff) / max(np.std(pnl_diff), 1e-10) * np.sqrt(365 * 86400))
+    # Fractional drawdown on a compounded equity curve, matching src/backtest.py
+    equity = np.exp(cumulative_pnl)
+    peak = np.maximum.accumulate(equity)
+    drawdown = 1.0 - equity / peak
     max_dd = float(np.max(drawdown)) if len(drawdown) > 0 else 0.0
     n_trades = int(np.sum(np.abs(np.diff(np.sign(pnl_diff))) > 0))
     hit_rate = float(np.mean(pnl_diff[pnl_diff != 0] > 0)) if np.any(pnl_diff != 0) else 0.0

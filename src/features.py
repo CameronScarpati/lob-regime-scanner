@@ -1,8 +1,10 @@
 """Microstructure feature computations.
 
-Computes OFI (multi-level), VPIN, book imbalance, weighted mid-price,
-spread, Kyle's lambda, trade flow aggression, cancellation ratio,
-realized volatility, and return autocorrelation.
+Computes OFI (multi-level, both a simple volume-delta proxy and the
+canonical price-conditioned Cont-Kukanov-Stoikov formulation), VPIN,
+book imbalance, weighted mid-price, spread, Kyle's lambda, trade flow
+aggression, cancellation ratio, realized volatility, and return
+autocorrelation.
 """
 
 import logging
@@ -80,6 +82,74 @@ def compute_ofi(df: pd.DataFrame, depths: list[int] | None = None) -> pd.DataFra
         result[f"ofi_{d}"] = ofi
         result[f"ofi_{d}_zscore"] = _rolling_zscore(ofi)
         result[f"ofi_{d}_velocity"] = ofi.diff()
+
+    return result
+
+
+def compute_ofi_cks(df: pd.DataFrame, depths: list[int] | None = None) -> pd.DataFrame:
+    """Canonical Cont-Kukanov-Stoikov order flow imbalance.
+
+    Unlike the simple proxy in :func:`compute_ofi` (change in total resting
+    volume), the canonical formulation conditions each level's contribution
+    on the direction of the price move at that level (Cont, Kukanov &
+    Stoikov, 2014, eq. for e_n):
+
+        e^bid_t = q^bid_t * 1{p^bid_t >= p^bid_{t-1}}
+                  - q^bid_{t-1} * 1{p^bid_t <= p^bid_{t-1}}
+        e^ask_t = q^ask_t * 1{p^ask_t <= p^ask_{t-1}}
+                  - q^ask_{t-1} * 1{p^ask_t >= p^ask_{t-1}}
+
+        OFI_t = sum over levels of (e^bid_t - e^ask_t)
+
+    A bid price improvement counts the full new queue as buying pressure; a
+    bid price drop counts the full vanished queue as selling pressure; an
+    unchanged price contributes the net queue-size change. The paper defines
+    this at the best level; applying it per level and summing across the top
+    *depth* levels is the standard multi-level extension.
+
+    Parameters
+    ----------
+    df : DataFrame with columns bid_price_i, bid_qty_i, ask_price_i,
+        ask_qty_i for i in 1..max(depths).
+    depths : list of depth levels (default [1, 5, 10]).
+
+    Returns
+    -------
+    DataFrame indexed like *df* with columns:
+        ofi_cks_{d}, ofi_cks_{d}_zscore  for each depth d.
+        The first row is NaN (no previous book state).
+    """
+    if depths is None:
+        depths = OFI_DEPTHS
+
+    max_depth = max(depths)
+    level_ofi: dict[int, np.ndarray] = {}
+    for i in range(1, max_depth + 1):
+        bp = df[f"bid_price_{i}"].values
+        ap = df[f"ask_price_{i}"].values
+        # Missing levels carry NaN qty; treat an absent queue as size 0.
+        bq = np.nan_to_num(df[f"bid_qty_{i}"].values.astype(np.float64), nan=0.0)
+        aq = np.nan_to_num(df[f"ask_qty_{i}"].values.astype(np.float64), nan=0.0)
+
+        bp_prev = np.roll(bp, 1)
+        bq_prev = np.roll(bq, 1)
+        ap_prev = np.roll(ap, 1)
+        aq_prev = np.roll(aq, 1)
+
+        # NaN comparisons evaluate False, so missing levels contribute 0.
+        with np.errstate(invalid="ignore"):
+            e_bid = np.where(bp >= bp_prev, bq, 0.0) - np.where(bp <= bp_prev, bq_prev, 0.0)
+            e_ask = np.where(ap <= ap_prev, aq, 0.0) - np.where(ap >= ap_prev, aq_prev, 0.0)
+        contrib = e_bid - e_ask
+        contrib[0] = np.nan  # no previous book state at the first row
+        level_ofi[i] = contrib
+
+    result = pd.DataFrame(index=df.index)
+    for d in depths:
+        total = np.sum([level_ofi[i] for i in range(1, d + 1)], axis=0)
+        ofi = pd.Series(total, index=df.index)
+        result[f"ofi_cks_{d}"] = ofi
+        result[f"ofi_cks_{d}_zscore"] = _rolling_zscore(ofi)
 
     return result
 
@@ -345,6 +415,9 @@ def build_feature_matrix(
     ofi = compute_ofi(df)
     parts.append(ofi)
 
+    # Canonical Cont-Kukanov-Stoikov OFI (price-conditioned per level)
+    parts.append(compute_ofi_cks(df))
+
     # VPIN
     if include_vpin:
         try:
@@ -389,9 +462,12 @@ def build_feature_matrix(
             features[col] = _rolling_zscore(features[col], window=zscore_window)
 
     # ---- NaN / inf handling -----------------------------------------------
+    # Forward-fill only: backward-filling would leak future values into the
+    # warm-up rows (lookahead). Remaining leading NaNs (rolling-window and
+    # VPIN warm-up) are set to 0.0, which is causal but means the earliest
+    # rows carry a neutral placeholder rather than a real signal.
     features.replace([np.inf, -np.inf], np.nan, inplace=True)
     features.ffill(inplace=True)
-    features.bfill(inplace=True)
     features.fillna(0.0, inplace=True)
 
     logger.info(
@@ -404,8 +480,10 @@ def build_feature_matrix(
 
 # Curated subset of features for HMM regime detection.
 # Keeping this small avoids the curse of dimensionality with full-covariance HMMs.
+# ofi_cks_1 is the canonical price-conditioned OFI; the simple proxy (ofi_1)
+# is still computed for comparison and dashboard display.
 HMM_FEATURE_COLS = [
-    "ofi_1",
+    "ofi_cks_1",
     "vpin",
     "book_imbalance",
     "spread_bps",

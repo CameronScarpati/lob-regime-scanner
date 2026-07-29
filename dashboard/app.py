@@ -250,6 +250,23 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
     n_trades = bt_stats.get("n_trades", 0)
     hit_rate = bt_stats.get("hit_rate", 0.0)
     total_pnl = bt_stats.get("total_pnl", 0.0)
+    is_walk_forward = "out_of_sample" in bt_stats
+    if is_walk_forward:
+        train_pct = round(bt_stats.get("train_frac", 0.7) * 100)
+        bt_caption = (
+            "(Regime-conditional: enter Quiet→Trending, "
+            f"flatten on Toxic · held-out {100 - train_pct}% after a "
+            f"{train_pct}% walk-forward fit · net of fees and slippage · "
+            "illustrative)"
+        )
+        sharpe_label = "Sharpe (OOS, net)"
+    else:
+        bt_caption = (
+            "(Regime-conditional: enter Quiet→Trending, "
+            "flatten on Toxic · in-sample · net of fees and slippage · "
+            "illustrative)"
+        )
+        sharpe_label = "Sharpe (ann., net)"
 
     # Build app
     dash_app = Dash(
@@ -381,9 +398,7 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                                 style={"letterSpacing": "0.08em"},
                                             ),
                                             dmc.Text(
-                                                "(Regime-conditional: enter Quiet\u2192Trending, "
-                                                "flatten on Toxic \u00b7 in-sample, no costs, "
-                                                "illustrative)",
+                                                bt_caption,
                                                 size="xs",
                                                 c="dimmed",
                                             ),
@@ -393,7 +408,7 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
                                         gap="xl",
                                         children=[
                                             _make_stat_item(
-                                                "Sharpe (ann.)",
+                                                sharpe_label,
                                                 f"{sharpe:.2f}",
                                                 "#4CAF82" if sharpe > 0 else "#EF6C6C",
                                             ),

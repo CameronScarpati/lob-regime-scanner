@@ -7,7 +7,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?style=flat&logo=cplusplus&logoColor=white)](https://isocpp.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-160-brightgreen?style=flat&logo=pytest&logoColor=white)]()
+[![Tests](https://img.shields.io/badge/Tests-186-brightgreen?style=flat&logo=pytest&logoColor=white)]()
 
 *A learning project exploring latent market microstructure regimes in Level 2*
 *order book data using Gaussian HMMs, microstructure features (OFI, VPIN, Kyle's*
@@ -65,15 +65,15 @@ These are qualitative observations on synthetic and sample data, not validated r
 
 ## Scope and Limitations
 
-This is a personal learning project for getting hands-on with Hidden Markov Models and order book microstructure. It is exploratory rather than a production trading signal, and the following limitations are deliberate and stated plainly so nothing here is mistaken for a validated result:
+This is a personal learning project for getting hands-on with Hidden Markov Models and order book microstructure. It is exploratory rather than a production trading signal. Several early methodological weaknesses (global-scaler lookahead, fully in-sample evaluation, cost-free same-bar backtesting) have since been fixed, and the remaining limitations are stated plainly so nothing here is mistaken for a validated result:
 
-- **No real-market validation.** The regime behavior shown above comes from synthetic and free sample data. None of it has been validated on a held-out real-market sample.
-- **In-sample only.** The HMM is fit and decoded on the same data, with no train/test split, so any backtest number is in-sample and could reflect overfitting rather than signal. There is no out-of-sample claim.
-- **Lookahead at standardization.** The default pipeline feeds raw features to the HMM, which applies one global `StandardScaler` at fit time. That scaler uses full-sample statistics, so the current pipeline carries lookahead at the standardization step. A correct version would use an expanding or trailing window.
-- **Backtest is illustrative.** It excludes transaction costs, fees, and slippage, and realizes PnL on the same bar the signal fires. It exists to visualize regime behavior, not to demonstrate a tradeable edge.
-- **Simplified OFI.** Order flow imbalance here is the change in total bid volume minus the change in total ask volume across the top levels, a coarser proxy than the price-conditioned formulation in Cont, Kukanov & Stoikov (2014).
+- **No real-market validation.** The regime behavior shown above comes from synthetic and free sample data. None of it has been validated at scale on real market data, and the regime labels (Quiet/Trending/Toxic) remain an interpretive reading.
+- **Walk-forward split, but a short one.** The default pipeline fits the HMM (and its feature scaler) on the first 70% of the data only and reports headline backtest statistics on the held-out 30%. That makes the numbers out-of-sample rather than in-sample, but the sample itself is short (single instrument, limited dates), so out-of-sample here still does not mean robust.
+- **Standardization is causal in the default pipeline.** The HMM's `StandardScaler` is fit on the train segment only, and feature NaN handling forward-fills without back-filling, so held-out rows are never scaled with future statistics. The legacy fully in-sample mode (`train_frac=None`) still uses a full-sample scaler.
+- **Backtest is more realistic, still illustrative.** Execution is next-bar (a signal never earns the bar it fires on) and results are net of configurable taker fees and slippage (default 6 bps per side), with gross figures reported alongside. It still models fills naively (full fill at the next mid, no queue position, no market impact) and exists to visualize regime behavior, not to demonstrate a tradeable edge.
+- **Two OFI formulations.** Both the simple volume-delta proxy and the canonical price-conditioned formulation of Cont, Kukanov & Stoikov (2014) are implemented; the HMM uses the canonical one, and the proxy is kept for comparison.
 - **Curated feature subset, diagonal covariance.** The pipeline computes roughly 30 candidate features but feeds a curated subset of 8 to the HMM, fit with diagonal covariance, to keep the parameter count manageable.
-- **C++ engine is optional and unbenchmarked.** The reconstruction engine is a systems exercise; its throughput target is a design aim, not a measured number.
+- **C++ engine is optional; throughput is measurable, not guaranteed.** A reproducible benchmark (`make bench`) is included. On a sample cloud VM it processed ~7M synthetic updates/sec through the C++ batch path and ~3.5M/sec through per-call Python bindings, single-threaded. Numbers are hardware-dependent and synthetic-workload measurements, not a validated performance claim.
 
 <br>
 
@@ -109,11 +109,11 @@ This is a personal learning project for getting hands-on with Hidden Markov Mode
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | **Core** | Python 3.11+, NumPy, Pandas | Feature computation, data pipeline |
-| **Performance** | C++17, pybind11 | LOB reconstruction engine (optional, not yet benchmarked) |
+| **Performance** | C++17, pybind11 | LOB reconstruction engine (optional, benchmark via `make bench`) |
 | **Statistics** | hmmlearn, scikit-learn, flowrisk | Gaussian HMM, VPIN computation |
 | **Visualization** | Plotly, Dash, Dash Mantine | Interactive 4-panel dashboard |
 | **Data** | Tardis.dev (direct HTTP) | Tick-level L2 snapshots, 40+ exchanges |
-| **Testing** | pytest (160 tests) | Unit tests across all modules |
+| **Testing** | pytest (186 tests) | Unit tests across all modules |
 
 <br>
 
@@ -229,7 +229,7 @@ lob-regime-scanner/
 │   └── generate_realistic.py          Synthetic data generator
 │
 ├── notebooks/                     Analysis notebooks (4)
-├── tests/                         pytest suite (160 tests)
+├── tests/                         pytest suite (186 tests)
 ├── docs/                          Methodology + results writeups
 └── pyproject.toml                 Dependencies & package config
 ```
@@ -253,11 +253,11 @@ lob-regime-scanner/
 
 The pipeline computes roughly **30 candidate microstructure features** from Level 2 snapshots, feeds a curated subset to a **Gaussian Hidden Markov Model**, and decodes regimes via the **Viterbi algorithm**:
 
-**Feature Engineering** — a simplified multi-level order flow imbalance proxy inspired by Cont, Kukanov & Stoikov (2014), VPIN (Easley, L&oacute;pez de Prado & O'Hara, 2012), Kyle's &lambda; via rolling OLS, book imbalance, realized volatility at 4 horizons, return autocorrelation at 10 lags, spread dynamics, trade aggression, and cancellation ratio. The feature module supports trailing-rolling-window z-scoring, but the default pipeline feeds raw features to the HMM, which applies one global `StandardScaler` at fit time. That global scaler uses full-sample statistics, so the current pipeline carries lookahead at the standardization step (see [Scope and Limitations](#scope-and-limitations)).
+**Feature Engineering** — order flow imbalance in two formulations (a simple multi-level volume-delta proxy and the canonical price-conditioned Cont, Kukanov & Stoikov (2014) version, which the HMM uses), VPIN (Easley, L&oacute;pez de Prado & O'Hara, 2012), Kyle's &lambda; via rolling OLS, book imbalance, realized volatility at 4 horizons, return autocorrelation at 10 lags, spread dynamics, trade aggression, and cancellation ratio. NaN handling is forward-fill only (no backward fill), so no feature row draws on future data.
 
-**HMM Regime Detection** — a 3-state Gaussian HMM, fit via Baum-Welch EM (up to 200 iterations) with diagonal covariance in the default pipeline (full covariance is also supported). States are auto-sorted by covariance trace (a volatility proxy) for deterministic labeling. A BIC/AIC sweep over K &isin; {2, 3, 4, 5} is implemented; the default uses K = 3, chosen for interpretability.
+**HMM Regime Detection** — a 3-state Gaussian HMM, fit via Baum-Welch EM (up to 200 iterations) with diagonal covariance in the default pipeline (full covariance is also supported). The default pipeline is walk-forward: the model and its `StandardScaler` are fit on the first 70% of the series only, then decode the full series, so held-out rows are never scaled with future statistics. States are auto-sorted by covariance trace (a volatility proxy) for deterministic labeling. A BIC/AIC sweep over K &isin; {2, 3, 4, 5} is implemented; the default uses K = 3, chosen for interpretability.
 
-**Backtest** — in-sample by construction: the HMM is fit and decoded on the same data, with no train/test split. A regime-conditional rule (enter on Quiet to Trending in the OFI direction, flatten on Toxic) is applied with no transaction costs and same-bar execution. It exists to visualize regime behavior, not to demonstrate a tradeable edge, and any Sharpe it reports is in-sample only.
+**Backtest** — a regime-conditional rule (enter on Quiet to Trending in the OFI direction, flatten on Toxic) with next-bar execution, taker fees and slippage (defaults: 5.5 + 0.5 bps per side), Sharpe annualized from the actual bar interval, and drawdown reported as a fraction of peak equity. Headline statistics come from the held-out segment, net of costs, with in-sample and gross figures reported alongside. It exists to visualize regime behavior, not to demonstrate a tradeable edge.
 
 <br>
 
@@ -265,7 +265,7 @@ The pipeline computes roughly **30 candidate microstructure features** from Leve
 
 ```bash
 make install-dev       # Create venv + install all dependencies
-make test              # Run pytest suite (160 tests)
+make test              # Run pytest suite (186 tests)
 make lint              # Run ruff linter
 make format            # Auto-format with ruff
 ```

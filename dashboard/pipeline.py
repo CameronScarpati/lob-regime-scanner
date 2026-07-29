@@ -63,6 +63,9 @@ def run_pipeline(
     end: str | None = None,
     sample_interval_us: int = 100_000,
     hmm_n_states: int = 3,
+    train_frac: float | None = 0.7,
+    fee_bps: float = 5.5,
+    slippage_bps: float = 0.5,
 ) -> dict:
     """Execute the full LOB analysis pipeline.
 
@@ -76,6 +79,14 @@ def run_pipeline(
         Snapshot subsampling interval in microseconds (default 100ms).
     hmm_n_states : int
         Number of HMM states (default 3).
+    train_frac : float or None
+        Walk-forward split fraction. The HMM (including its feature scaler)
+        is fit on the first ``train_frac`` of the data only, then decodes
+        the full series, and backtest statistics are reported separately
+        for the train (in-sample) and held-out (out-of-sample) segments.
+        ``None`` fits on the full series (fully in-sample, legacy behavior).
+    fee_bps / slippage_bps : float
+        Per-side transaction cost assumptions passed to the backtest.
 
     Returns
     -------
@@ -148,13 +159,36 @@ def run_pipeline(
     hmm_features = feature_matrix[hmm_cols]
 
     # ── Step 3: Fit HMM and decode regimes ───────────────────────────────
-    logger.info("Fitting HMM with %d states on %d features ...", hmm_n_states, len(hmm_cols))
+    n_samples = len(hmm_features)
+    split_idx: int | None = None
+    if train_frac is not None:
+        if not 0.0 < train_frac < 1.0:
+            raise ValueError(f"train_frac must be in (0, 1), got {train_frac}")
+        split_idx = int(n_samples * train_frac)
+        if split_idx < 2 or n_samples - split_idx < 2:
+            logger.warning(
+                "Too few samples (%d) for a %.0f%% walk-forward split; fitting in-sample.",
+                n_samples,
+                train_frac * 100,
+            )
+            split_idx = None
+
+    fit_features = hmm_features.iloc[:split_idx] if split_idx is not None else hmm_features
+    logger.info(
+        "Fitting HMM with %d states on %d features (%d of %d samples) ...",
+        hmm_n_states,
+        len(hmm_cols),
+        len(fit_features),
+        n_samples,
+    )
     detector = RegimeDetector(
         n_states=hmm_n_states,
         covariance_type="diag",
         labels=REGIME_LABELS,
     )
-    detector.fit(hmm_features, n_restarts=10)
+    # Fitting on the train slice only keeps the scaler causal for the
+    # held-out segment: no full-sample statistics leak into it.
+    detector.fit(fit_features, n_restarts=10)
     states = detector.predict(hmm_features)
     state_probs = detector.predict_proba(hmm_features)
     trans_mat = detector.transition_matrix()
@@ -170,8 +204,15 @@ def run_pipeline(
     mid = snap_df["mid_price"].values
     returns = np.diff(np.log(mid), prepend=np.log(mid[0]))
 
-    # Use OFI depth-1 for directional signal
-    ofi_col = "ofi_1" if "ofi_1" in feature_matrix.columns else None
+    # Annualize from the actual bar interval (24/7 crypto market)
+    bars_per_year = 365.0 * 24 * 3600 * 1e6 / sample_interval_us
+
+    # Directional signal: canonical CKS OFI at depth 1, falling back to the
+    # simple volume-delta proxy.
+    ofi_col = next(
+        (c for c in ("ofi_cks_1", "ofi_1") if c in feature_matrix.columns),
+        None,
+    )
     if ofi_col is None:
         ofi_col = next(
             (
@@ -183,16 +224,59 @@ def run_pipeline(
         )
     ofi = feature_matrix[ofi_col].values if ofi_col else np.zeros(len(states))
 
-    bt = run_backtest(states, returns, ofi)
-    logger.info(
-        "Backtest: Sharpe=%.2f, MaxDD=%.4f, Trades=%d",
-        bt.sharpe_ratio,
-        bt.max_drawdown,
-        bt.n_trades,
-    )
+    bt_kwargs = {
+        "bars_per_year": bars_per_year,
+        "fee_bps": fee_bps,
+        "slippage_bps": slippage_bps,
+    }
+
+    def _stats(bt) -> dict:
+        return {
+            "sharpe_ratio": round(bt.sharpe_ratio, 2),
+            "sharpe_ratio_gross": round(bt.sharpe_ratio_gross, 2),
+            "max_drawdown": round(bt.max_drawdown, 4),
+            "n_trades": bt.n_trades,
+            "hit_rate": round(bt.hit_rate, 3),
+            "total_pnl": round(bt.total_pnl, 4),
+            "total_costs": round(bt.total_costs, 4),
+        }
+
+    if split_idx is not None:
+        bt_is = run_backtest(states[:split_idx], returns[:split_idx], ofi[:split_idx], **bt_kwargs)
+        bt_oos = run_backtest(states[split_idx:], returns[split_idx:], ofi[split_idx:], **bt_kwargs)
+        bt_pnl = np.concatenate(
+            [
+                bt_is.cumulative_pnl,
+                bt_is.cumulative_pnl[-1] + bt_oos.cumulative_pnl,
+            ]
+        )
+        # Headline stats are the held-out segment, net of costs.
+        backtest_stats = _stats(bt_oos)
+        backtest_stats["in_sample"] = _stats(bt_is)
+        backtest_stats["out_of_sample"] = _stats(bt_oos)
+        backtest_stats["split_index"] = split_idx
+        backtest_stats["train_frac"] = train_frac
+        logger.info(
+            "Backtest OOS: Sharpe=%.2f (gross %.2f), MaxDD=%.2f%%, Trades=%d, Costs=%.4f",
+            bt_oos.sharpe_ratio,
+            bt_oos.sharpe_ratio_gross,
+            bt_oos.max_drawdown * 100,
+            bt_oos.n_trades,
+            bt_oos.total_costs,
+        )
+    else:
+        bt = run_backtest(states, returns, ofi, **bt_kwargs)
+        bt_pnl = bt.cumulative_pnl
+        backtest_stats = _stats(bt)
+        backtest_stats["in_sample"] = _stats(bt)
+        logger.info(
+            "Backtest (in-sample): Sharpe=%.2f, MaxDD=%.2f%%, Trades=%d",
+            bt.sharpe_ratio,
+            bt.max_drawdown * 100,
+            bt.n_trades,
+        )
 
     # ── Step 5: Prepare dashboard-compatible output ──────────────────────
-    bt_pnl = bt.cumulative_pnl
 
     # Convert microsecond timestamps to datetime for dashboard display
     snap_out = snap_df.copy()
@@ -234,11 +318,5 @@ def run_pipeline(
             "transition_matrix": trans_mat,
         },
         "cumulative_pnl": bt_pnl,
-        "backtest_stats": {
-            "sharpe_ratio": round(bt.sharpe_ratio, 2),
-            "max_drawdown": round(bt.max_drawdown, 4),
-            "n_trades": bt.n_trades,
-            "hit_rate": round(bt.hit_rate, 3),
-            "total_pnl": round(bt.total_pnl, 4),
-        },
+        "backtest_stats": backtest_stats,
     }
