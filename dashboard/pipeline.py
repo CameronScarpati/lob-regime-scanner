@@ -14,12 +14,40 @@ import pandas as pd
 
 from src.backtest import run_backtest
 from src.data_loader import load_snapshots_directory
-from src.features import HMM_FEATURE_COLS, build_feature_matrix
+from src.features import HMM_FEATURE_COLS, build_feature_matrix, estimate_vpin_bucket_volume
 from src.hmm_model import REGIME_LABELS, RegimeDetector
 
 logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
+
+
+def _resolve_split(n_rows: int, train_frac: float | None, n_states: int) -> int | None:
+    """Index splitting train from held-out data, or None to fit in-sample.
+
+    The training slice must be large enough to actually fit the HMM (k-means
+    init needs at least ``n_states`` rows, and a usable transition matrix
+    needs many more), so tiny inputs fall back to the in-sample path rather
+    than raising from inside hmmlearn.
+    """
+    if train_frac is None:
+        return None
+    if not 0.0 < train_frac < 1.0:
+        raise ValueError(f"train_frac must be in (0, 1), got {train_frac}")
+
+    split_idx = int(n_rows * train_frac)
+    min_train = max(n_states * 4, 20)
+    if split_idx < min_train or n_rows - split_idx < 2:
+        logger.warning(
+            "Too few samples (%d) for a %.0f%% walk-forward split "
+            "(train slice would be %d, need >= %d); fitting in-sample.",
+            n_rows,
+            train_frac * 100,
+            split_idx,
+            min_train,
+        )
+        return None
+    return split_idx
 
 
 class NoDataError(Exception):
@@ -63,6 +91,9 @@ def run_pipeline(
     end: str | None = None,
     sample_interval_us: int = 100_000,
     hmm_n_states: int = 3,
+    train_frac: float | None = 0.7,
+    fee_bps: float = 5.5,
+    slippage_bps: float = 0.5,
 ) -> dict:
     """Execute the full LOB analysis pipeline.
 
@@ -76,6 +107,16 @@ def run_pipeline(
         Snapshot subsampling interval in microseconds (default 100ms).
     hmm_n_states : int
         Number of HMM states (default 3).
+    train_frac : float or None
+        Walk-forward split fraction. The HMM (including its feature scaler
+        and VPIN bucket sizing) is fit on the first ``train_frac`` of the
+        data only, then decodes the full series causally, and backtest
+        statistics are reported separately for the train (in-sample) and
+        held-out (out-of-sample) segments. ``None`` fits on the full series
+        (fully in-sample, legacy behavior). Inputs too small to support a
+        split fall back to the in-sample path with a warning.
+    fee_bps / slippage_bps : float
+        Per-side transaction cost assumptions passed to the backtest.
 
     Returns
     -------
@@ -136,11 +177,23 @@ def run_pipeline(
     logger.info("Loaded %d snapshots", len(snap_df))
 
     # ── Step 2: Compute features ─────────────────────────────────────────
+    # Resolve the walk-forward split first: VPIN's volume-bucket size is a
+    # full-sample statistic of whatever frame it sees, so it must be
+    # estimated from the training segment alone or held-out volume leaks
+    # into every VPIN value.
+    split_idx = _resolve_split(len(snap_df), train_frac, hmm_n_states)
+    train_slice = snap_df.iloc[:split_idx] if split_idx is not None else snap_df
+    vpin_bucket_volume = estimate_vpin_bucket_volume(train_slice)
+
     # Build raw (un-z-scored) features.  The HMM's internal StandardScaler
     # handles normalisation; rolling z-score would remove the very
     # heteroscedasticity the HMM needs to distinguish regimes.
     logger.info("Computing features ...")
-    feature_matrix = build_feature_matrix(snap_df, standardize=False)
+    feature_matrix = build_feature_matrix(
+        snap_df,
+        standardize=False,
+        vpin_bucket_volume=vpin_bucket_volume,
+    )
 
     # Select a curated subset for HMM to avoid curse of dimensionality
     # (30+ features with full covariance → ~1400 params for 3 states).
@@ -148,15 +201,31 @@ def run_pipeline(
     hmm_features = feature_matrix[hmm_cols]
 
     # ── Step 3: Fit HMM and decode regimes ───────────────────────────────
-    logger.info("Fitting HMM with %d states on %d features ...", hmm_n_states, len(hmm_cols))
+    n_samples = len(hmm_features)
+    fit_features = hmm_features.iloc[:split_idx] if split_idx is not None else hmm_features
+    logger.info(
+        "Fitting HMM with %d states on %d features (%d of %d samples) ...",
+        hmm_n_states,
+        len(hmm_cols),
+        len(fit_features),
+        n_samples,
+    )
     detector = RegimeDetector(
         n_states=hmm_n_states,
         covariance_type="diag",
         labels=REGIME_LABELS,
     )
-    detector.fit(hmm_features, n_restarts=10)
-    states = detector.predict(hmm_features)
-    state_probs = detector.predict_proba(hmm_features)
+    # Fitting on the train slice only keeps the scaler causal for the
+    # held-out segment: no full-sample statistics leak into it.
+    detector.fit(fit_features, n_restarts=10)
+
+    # Causal (forward-filtered) states drive the backtest: the label at bar
+    # t uses no observation after t, so it is a signal a live system could
+    # actually produce. The Viterbi path is a smoother — its label at t
+    # depends on the whole series — so it is kept only for visualization.
+    states = detector.predict_filtered(hmm_features)
+    state_probs = detector.filtered_proba(hmm_features)
+    states_smoothed = detector.predict(hmm_features)
     trans_mat = detector.transition_matrix()
 
     logger.info(
@@ -170,8 +239,15 @@ def run_pipeline(
     mid = snap_df["mid_price"].values
     returns = np.diff(np.log(mid), prepend=np.log(mid[0]))
 
-    # Use OFI depth-1 for directional signal
-    ofi_col = "ofi_1" if "ofi_1" in feature_matrix.columns else None
+    # Annualize from the actual bar interval (24/7 crypto market)
+    bars_per_year = 365.0 * 24 * 3600 * 1e6 / sample_interval_us
+
+    # Directional signal: canonical CKS OFI at depth 1, falling back to the
+    # simple volume-delta proxy.
+    ofi_col = next(
+        (c for c in ("ofi_cks_1", "ofi_1") if c in feature_matrix.columns),
+        None,
+    )
     if ofi_col is None:
         ofi_col = next(
             (
@@ -183,16 +259,59 @@ def run_pipeline(
         )
     ofi = feature_matrix[ofi_col].values if ofi_col else np.zeros(len(states))
 
-    bt = run_backtest(states, returns, ofi)
-    logger.info(
-        "Backtest: Sharpe=%.2f, MaxDD=%.4f, Trades=%d",
-        bt.sharpe_ratio,
-        bt.max_drawdown,
-        bt.n_trades,
-    )
+    bt_kwargs = {
+        "bars_per_year": bars_per_year,
+        "fee_bps": fee_bps,
+        "slippage_bps": slippage_bps,
+    }
+
+    def _stats(bt) -> dict:
+        return {
+            "sharpe_ratio": round(bt.sharpe_ratio, 2),
+            "sharpe_ratio_gross": round(bt.sharpe_ratio_gross, 2),
+            "max_drawdown": round(bt.max_drawdown, 4),
+            "n_trades": bt.n_trades,
+            "hit_rate": round(bt.hit_rate, 3),
+            "total_pnl": round(bt.total_pnl, 4),
+            "total_costs": round(bt.total_costs, 4),
+        }
+
+    if split_idx is not None:
+        bt_is = run_backtest(states[:split_idx], returns[:split_idx], ofi[:split_idx], **bt_kwargs)
+        bt_oos = run_backtest(states[split_idx:], returns[split_idx:], ofi[split_idx:], **bt_kwargs)
+        bt_pnl = np.concatenate(
+            [
+                bt_is.cumulative_pnl,
+                bt_is.cumulative_pnl[-1] + bt_oos.cumulative_pnl,
+            ]
+        )
+        # Headline stats are the held-out segment, net of costs.
+        backtest_stats = _stats(bt_oos)
+        backtest_stats["in_sample"] = _stats(bt_is)
+        backtest_stats["out_of_sample"] = _stats(bt_oos)
+        backtest_stats["split_index"] = split_idx
+        backtest_stats["train_frac"] = train_frac
+        logger.info(
+            "Backtest OOS: Sharpe=%.2f (gross %.2f), MaxDD=%.2f%%, Trades=%d, Costs=%.4f",
+            bt_oos.sharpe_ratio,
+            bt_oos.sharpe_ratio_gross,
+            bt_oos.max_drawdown * 100,
+            bt_oos.n_trades,
+            bt_oos.total_costs,
+        )
+    else:
+        bt = run_backtest(states, returns, ofi, **bt_kwargs)
+        bt_pnl = bt.cumulative_pnl
+        backtest_stats = _stats(bt)
+        backtest_stats["in_sample"] = _stats(bt)
+        logger.info(
+            "Backtest (in-sample): Sharpe=%.2f, MaxDD=%.2f%%, Trades=%d",
+            bt.sharpe_ratio,
+            bt.max_drawdown * 100,
+            bt.n_trades,
+        )
 
     # ── Step 5: Prepare dashboard-compatible output ──────────────────────
-    bt_pnl = bt.cumulative_pnl
 
     # Convert microsecond timestamps to datetime for dashboard display
     snap_out = snap_df.copy()
@@ -231,14 +350,9 @@ def run_pipeline(
         "hmm": {
             "states": states,
             "state_probs": state_probs,
+            "states_smoothed": states_smoothed,
             "transition_matrix": trans_mat,
         },
         "cumulative_pnl": bt_pnl,
-        "backtest_stats": {
-            "sharpe_ratio": round(bt.sharpe_ratio, 2),
-            "max_drawdown": round(bt.max_drawdown, 4),
-            "n_trades": bt.n_trades,
-            "hit_rate": round(bt.hit_rate, 3),
-            "total_pnl": round(bt.total_pnl, 4),
-        },
+        "backtest_stats": backtest_stats,
     }

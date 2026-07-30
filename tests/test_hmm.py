@@ -405,6 +405,117 @@ class TestBacktest:
 
 
 # ---------------------------------------------------------------------------
+# Walk-forward fitting (scaler causality)
+# ---------------------------------------------------------------------------
+
+
+def _make_overlapping_regime_data(
+    n_cycles: int = 12,
+    n_features: int = 4,
+    seed: int = 3,
+) -> np.ndarray:
+    """Regimes with overlapping distributions, where smoothing and filtering
+    genuinely disagree (well-separated regimes hide the difference)."""
+    rng = np.random.default_rng(seed)
+    segments = []
+    for _ in range(n_cycles):
+        for mu, sd in [(0.0, 1.0), (0.6, 1.25), (1.4, 1.6)]:
+            n = int(rng.integers(40, 120))
+            segments.append(rng.normal(mu, sd, (n, n_features)))
+    return np.vstack(segments)
+
+
+class TestCausalDecode:
+    """predict_filtered must be causal; predict (Viterbi) is a smoother."""
+
+    def test_filtered_proba_is_a_distribution(self):
+        X, _ = _make_regime_data(n_per_regime=100)
+        det = RegimeDetector(n_states=3, n_iter=100, random_state=42).fit(X)
+        probs = det.filtered_proba(X)
+        assert probs.shape == (len(X), 3)
+        np.testing.assert_allclose(probs.sum(axis=1), 1.0)
+        assert np.all(probs >= 0.0)
+
+    def test_filtered_states_match_filtered_proba_argmax(self):
+        X, _ = _make_regime_data(n_per_regime=100)
+        det = RegimeDetector(n_states=3, n_iter=100, random_state=42).fit(X)
+        np.testing.assert_array_equal(
+            det.predict_filtered(X), np.argmax(det.filtered_proba(X), axis=1)
+        )
+
+    def test_filtered_decode_is_prefix_invariant(self):
+        """The causality property: appending future data must never change a
+        past filtered estimate."""
+        X = _make_overlapping_regime_data()
+        split = int(len(X) * 0.7)
+        det = RegimeDetector(n_states=3, covariance_type="diag", n_iter=100, random_state=42)
+        det.fit(X[:split])
+
+        full = det.predict_filtered(X)
+        for k in (split, split + 50, split + 200, len(X) - 1):
+            np.testing.assert_array_equal(det.predict_filtered(X[:k]), full[:k])
+
+    def test_filtered_proba_is_prefix_invariant(self):
+        X = _make_overlapping_regime_data()
+        split = int(len(X) * 0.7)
+        det = RegimeDetector(n_states=3, covariance_type="diag", n_iter=100, random_state=42)
+        det.fit(X[:split])
+
+        full = det.filtered_proba(X)
+        np.testing.assert_allclose(det.filtered_proba(X[: split + 100]), full[: split + 100])
+
+    def test_viterbi_is_not_prefix_invariant(self):
+        """Documents why the backtest cannot use predict(): the Viterbi label
+        at time t changes when later observations arrive."""
+        X = _make_overlapping_regime_data()
+        split = int(len(X) * 0.7)
+        det = RegimeDetector(n_states=3, covariance_type="diag", n_iter=100, random_state=42)
+        det.fit(X[:split])
+
+        full = det.predict(X)
+        assert not np.array_equal(det.predict(X[:split]), full[:split])
+
+    def test_empty_input(self):
+        X, _ = _make_regime_data(n_per_regime=100)
+        det = RegimeDetector(n_states=3, n_iter=100, random_state=42).fit(X)
+        assert det.predict_filtered(np.empty((0, X.shape[1]))).shape == (0,)
+        assert det.filtered_proba(np.empty((0, X.shape[1]))).shape == (0, 3)
+
+    def test_requires_fit(self):
+        det = RegimeDetector(n_states=3)
+        with pytest.raises(RuntimeError):
+            det.filtered_proba(np.zeros((10, 3)))
+
+
+class TestWalkForward:
+    """Fitting on a train slice must keep the scaler causal for held-out data."""
+
+    def test_scaler_uses_train_statistics_only(self):
+        X, _ = _make_alternating_regime_data(n_cycles=5, cycle_len=100)
+        split = int(len(X) * 0.7)
+        det = RegimeDetector(n_states=3, n_iter=100, random_state=42)
+        det.fit(X[:split])
+
+        # The internal scaler must carry train-slice statistics, not
+        # full-sample statistics (which would be lookahead).
+        np.testing.assert_allclose(det._scaler.mean_, X[:split].mean(axis=0))
+        assert not np.allclose(det._scaler.mean_, X.mean(axis=0))
+
+    def test_decode_full_series_with_train_fitted_model(self):
+        X, _ = _make_alternating_regime_data(n_cycles=5, cycle_len=100)
+        split = int(len(X) * 0.7)
+        det = RegimeDetector(n_states=3, n_iter=100, random_state=42)
+        det.fit(X[:split])
+
+        states = det.predict(X)
+        probs = det.predict_proba(X)
+        assert states.shape == (len(X),)
+        assert probs.shape == (len(X), 3)
+        # The held-out segment must still be decodable into valid states
+        assert set(np.unique(states[split:])).issubset({0, 1, 2})
+
+
+# ---------------------------------------------------------------------------
 # Integration: HMM + Backtest
 # ---------------------------------------------------------------------------
 

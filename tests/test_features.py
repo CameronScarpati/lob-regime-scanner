@@ -6,6 +6,7 @@ import pytest
 
 from src.features import (
     AUTOCORR_LAGS,
+    HMM_FEATURE_COLS,
     N_LEVELS,
     OFI_DEPTHS,
     RVOL_HORIZONS,
@@ -15,12 +16,14 @@ from src.features import (
     compute_cancellation_ratio,
     compute_kyles_lambda,
     compute_ofi,
+    compute_ofi_cks,
     compute_realized_volatility,
     compute_return_autocorrelation,
     compute_spread_bps,
     compute_trade_flow_aggression,
     compute_vpin,
     compute_weighted_mid,
+    estimate_vpin_bucket_volume,
 )
 
 # ---------------------------------------------------------------------------
@@ -141,6 +144,93 @@ class TestOFI:
         assert ofi["ofi_1"].iloc[1] == pytest.approx(2.0)
         # row 2: Δbid=-4, Δask=4 → OFI=-8
         assert ofi["ofi_1"].iloc[2] == pytest.approx(-8.0)
+
+
+# ---------------------------------------------------------------------------
+# Canonical Cont-Kukanov-Stoikov OFI
+# ---------------------------------------------------------------------------
+
+
+def _make_cks_df() -> pd.DataFrame:
+    """Hand-crafted level-1 book states covering every price-move case."""
+    return pd.DataFrame(
+        {
+            "bid_price_1": [100.0, 100.0, 100.5, 100.0, 100.0],
+            "bid_qty_1": [10.0, 12.0, 5.0, 6.0, 6.0],
+            "ask_price_1": [101.0, 101.0, 101.0, 100.8, 101.0],
+            "ask_qty_1": [10.0, 10.0, 8.0, 4.0, 9.0],
+        }
+    )
+
+
+class TestOFICKS:
+    def test_columns_present(self, snapshot_df: pd.DataFrame) -> None:
+        ofi = compute_ofi_cks(snapshot_df)
+        for d in OFI_DEPTHS:
+            assert f"ofi_cks_{d}" in ofi.columns
+            assert f"ofi_cks_{d}_zscore" in ofi.columns
+
+    def test_output_length(self, snapshot_df: pd.DataFrame) -> None:
+        ofi = compute_ofi_cks(snapshot_df)
+        assert len(ofi) == len(snapshot_df)
+
+    def test_first_row_nan(self, snapshot_df: pd.DataFrame) -> None:
+        """No previous book state at the first row."""
+        ofi = compute_ofi_cks(snapshot_df)
+        assert np.isnan(ofi["ofi_cks_1"].iloc[0])
+
+    def test_known_values(self) -> None:
+        """Every price-move branch of the CKS formula, hand-computed."""
+        ofi = compute_ofi_cks(_make_cks_df(), depths=[1])["ofi_cks_1"]
+        # r1: prices unchanged -> net queue changes: (12-10) - (10-10) = 2
+        assert ofi.iloc[1] == pytest.approx(2.0)
+        # r2: bid price up -> +bq_t = 5; ask unchanged -> e_ask = 8-10 = -2
+        # OFI = 5 - (-2) = 7
+        assert ofi.iloc[2] == pytest.approx(7.0)
+        # r3: bid price down -> -bq_prev = -5; ask price down -> e_ask = +4
+        # OFI = -5 - 4 = -9
+        assert ofi.iloc[3] == pytest.approx(-9.0)
+        # r4: bid flat, qty flat -> 0; ask price up -> e_ask = -aq_prev = -4
+        # OFI = 0 + 4 = 4
+        assert ofi.iloc[4] == pytest.approx(4.0)
+
+    def test_differs_from_simple_proxy_on_price_moves(self) -> None:
+        """When a quote price moves, the canonical OFI counts the full
+        queue, while the proxy only sees the net volume delta."""
+        df = _make_cks_df()
+        canonical = compute_ofi_cks(df, depths=[1])["ofi_cks_1"]
+        proxy = compute_ofi(df, depths=[1])["ofi_1"]
+        # r1 (no price move): both reduce to the volume delta
+        assert canonical.iloc[1] == pytest.approx(proxy.iloc[1])
+        # r2 (bid price improvement): they disagree, canonical is positive
+        assert canonical.iloc[2] != pytest.approx(proxy.iloc[2])
+        assert canonical.iloc[2] > 0 > proxy.iloc[2]
+
+    def test_multi_level_sums_levels(self) -> None:
+        df = _make_cks_df()
+        # Duplicate level 1 as level 2 -> depth-2 OFI is exactly double
+        for col in ["bid_price", "bid_qty", "ask_price", "ask_qty"]:
+            df[f"{col}_2"] = df[f"{col}_1"]
+        ofi = compute_ofi_cks(df, depths=[1, 2])
+        np.testing.assert_allclose(ofi["ofi_cks_2"].iloc[1:], 2 * ofi["ofi_cks_1"].iloc[1:])
+
+    def test_nan_qty_treated_as_empty_level(self) -> None:
+        df = _make_cks_df()
+        df.loc[2, "bid_qty_1"] = np.nan
+        ofi = compute_ofi_cks(df, depths=[1])["ofi_cks_1"]
+        # r2: bid price up with NaN qty -> bid contributes 0, ask still -2
+        assert ofi.iloc[2] == pytest.approx(2.0)
+        assert np.isfinite(ofi.iloc[2:]).all()
+
+    def test_missing_level_contributes_zero(self) -> None:
+        """A fully absent level (NaN price and qty) must add exactly 0, not
+        propagate NaN into the depth sum."""
+        df = _make_cks_df()
+        for col in ["bid_price", "bid_qty", "ask_price", "ask_qty"]:
+            df[f"{col}_2"] = np.nan
+        ofi = compute_ofi_cks(df, depths=[1, 2])
+        np.testing.assert_allclose(ofi["ofi_cks_2"].iloc[1:], ofi["ofi_cks_1"].iloc[1:])
+        assert np.isfinite(ofi["ofi_cks_2"].iloc[1:]).all()
 
 
 # ---------------------------------------------------------------------------
@@ -371,11 +461,12 @@ class TestBuildFeatureMatrix:
     def test_expected_column_count(self, snapshot_df: pd.DataFrame) -> None:
         fm = build_feature_matrix(snapshot_df, include_vpin=False)
         # OFI: 3 depths × 3 (raw, zscore, velocity) = 9
+        # CKS OFI: 3 depths × 2 (raw, zscore) = 6
         # book_imbalance, weighted_mid, spread_bps, kyles_lambda,
         # trade_aggression, cancellation_ratio = 6
         # rvol: 4 horizons = 4
         # ret_autocorr: 10 lags = 10
-        expected = 9 + 6 + 4 + 10
+        expected = 9 + 6 + 6 + 4 + 10
         assert fm.shape[1] == expected
 
     def test_all_columns_finite(self, snapshot_df: pd.DataFrame) -> None:
@@ -387,3 +478,85 @@ class TestBuildFeatureMatrix:
         fm = build_feature_matrix(small_df, include_vpin=False)
         assert fm.shape[0] == len(small_df)
         assert not fm.isna().any().any()
+
+
+# ---------------------------------------------------------------------------
+# Causality of the feature matrix
+# ---------------------------------------------------------------------------
+
+
+class TestFeatureCausality:
+    """No feature row may draw on data from a later row."""
+
+    def test_leading_nan_is_neutral_not_back_filled(self, snapshot_df: pd.DataFrame) -> None:
+        """Row 0 OFI is undefined (no previous book). It must become the
+        neutral 0.0 placeholder, never row 1's future value."""
+        fm = build_feature_matrix(snapshot_df, include_vpin=False)
+        raw_row1_proxy = compute_ofi(snapshot_df, depths=[1])["ofi_1"].iloc[1]
+        raw_row1_cks = compute_ofi_cks(snapshot_df, depths=[1])["ofi_cks_1"].iloc[1]
+
+        assert fm["ofi_1"].iloc[0] == 0.0
+        assert fm["ofi_cks_1"].iloc[0] == 0.0
+        # Guard against a re-introduced bfill, which would copy row 1 back
+        assert fm["ofi_1"].iloc[0] != pytest.approx(raw_row1_proxy)
+        assert fm["ofi_cks_1"].iloc[0] != pytest.approx(raw_row1_cks)
+
+    def test_future_rows_do_not_change_past_features(self, snapshot_df: pd.DataFrame) -> None:
+        """Truncating the input must not change any surviving feature row."""
+        cut = 300
+        full = build_feature_matrix(snapshot_df, include_vpin=False)
+        prefix = build_feature_matrix(snapshot_df.iloc[:cut].copy(), include_vpin=False)
+        pd.testing.assert_frame_equal(full.iloc[:cut], prefix)
+
+    def test_vpin_bucket_volume_is_injectable(self, snapshot_df: pd.DataFrame) -> None:
+        """The pipeline sizes VPIN buckets from the training segment, so the
+        parameter must actually reach compute_vpin and change the result."""
+        train_bucket = estimate_vpin_bucket_volume(snapshot_df.iloc[:350])
+        full_bucket = estimate_vpin_bucket_volume(snapshot_df)
+        assert train_bucket < full_bucket
+
+        with_train = build_feature_matrix(
+            snapshot_df, include_vpin=True, vpin_bucket_volume=train_bucket
+        )
+        with_full = build_feature_matrix(
+            snapshot_df, include_vpin=True, vpin_bucket_volume=full_bucket
+        )
+        assert not np.allclose(with_train["vpin"].values, with_full["vpin"].values)
+
+    def test_estimate_vpin_bucket_volume_uses_only_given_rows(
+        self, snapshot_df: pd.DataFrame
+    ) -> None:
+        head = snapshot_df.iloc[:250].copy()
+        inflated = snapshot_df.copy()
+        inflated.loc[250:, "last_trade_qty"] *= 100
+        assert estimate_vpin_bucket_volume(head) == pytest.approx(
+            estimate_vpin_bucket_volume(inflated.iloc[:250])
+        )
+
+    def test_vpin_head_without_price_is_nan_not_back_filled(
+        self, snapshot_df: pd.DataFrame
+    ) -> None:
+        """Rows before the first observed price have no causal VPIN value."""
+        df = snapshot_df.copy()
+        df.loc[:4, "mid_price"] = np.nan
+        vpin = compute_vpin(df)
+        assert vpin.iloc[:5].isna().all()
+
+
+# ---------------------------------------------------------------------------
+# HMM feature contract
+# ---------------------------------------------------------------------------
+
+
+class TestHMMFeatureCols:
+    def test_all_hmm_features_are_produced(self, snapshot_df: pd.DataFrame) -> None:
+        """A rename in the feature module must not silently shrink the HMM
+        input: pipeline.py filters HMM_FEATURE_COLS against the matrix."""
+        fm = build_feature_matrix(snapshot_df, include_vpin=True)
+        missing = set(HMM_FEATURE_COLS) - set(fm.columns)
+        assert not missing, f"HMM features absent from feature matrix: {missing}"
+
+    def test_hmm_uses_canonical_ofi(self) -> None:
+        """The canonical CKS OFI is the model input; the proxy is not."""
+        assert "ofi_cks_1" in HMM_FEATURE_COLS
+        assert "ofi_1" not in HMM_FEATURE_COLS
