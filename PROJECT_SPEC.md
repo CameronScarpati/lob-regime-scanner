@@ -176,10 +176,12 @@ states = model.predict(X_test)
 state_probs = model.predict_proba(X_test)
 ```
 
-> As built, the pipeline uses `covariance_type="diag"` and fits and decodes on the
-> same data (no train/test split). The train/test snippet above is the intended
-> design, not what the current code does. See `docs/methodology.md` Sections 2.2
-> and 4.1.
+> As built, the pipeline uses `covariance_type="diag"` and does implement the
+> train/test split sketched above (`train_frac=0.7`), with one addition the
+> snippet misses: decoding for the trading signal uses the causal filtered
+> estimate (`predict_filtered`), not `predict`/`predict_proba`, because Viterbi
+> and forward-backward are smoothers whose label at time *t* depends on later
+> observations. See `docs/methodology.md` Sections 2.2, 2.3, and 4.1.
 
 ### 3.2 Regime-Conditional Analysis
 

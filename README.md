@@ -65,7 +65,7 @@ These are qualitative observations on synthetic and sample data, not validated r
 
 ## Scope and Limitations
 
-This is a personal learning project for getting hands-on with Hidden Markov Models and order book microstructure. It is exploratory rather than a production trading signal. Several early methodological weaknesses (global-scaler lookahead, fully in-sample evaluation, cost-free same-bar backtesting) have since been fixed, and the remaining limitations are stated plainly so nothing here is mistaken for a validated result:
+This is a personal learning project for getting hands-on with Hidden Markov Models and order book microstructure. It is exploratory rather than a production trading signal. Several early methodological weaknesses have since been fixed — full-sample scaling, a fully in-sample fit, a cost-free same-bar backtest, and a non-causal smoothed decode driving the signal — and the remaining limitations are stated plainly so nothing here is mistaken for a validated result:
 
 - **No real-market validation.** The regime behavior shown above comes from synthetic and free sample data. None of it has been validated at scale on real market data, and the regime labels (Quiet/Trending/Toxic) remain an interpretive reading.
 - **Walk-forward split, but a short one.** The default pipeline fits the HMM (and its feature scaler) on the first 70% of the data only and reports headline backtest statistics on the held-out 30%. That makes the numbers out-of-sample rather than in-sample, but the sample itself is short (single instrument, limited dates), so out-of-sample here still does not mean robust.
