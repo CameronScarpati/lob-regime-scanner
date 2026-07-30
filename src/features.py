@@ -159,6 +159,29 @@ def compute_ofi_cks(df: pd.DataFrame, depths: list[int] | None = None) -> pd.Dat
 # ---------------------------------------------------------------------------
 
 
+def _vpin_volumes(df: pd.DataFrame) -> np.ndarray:
+    """Trade volumes for VPIN: real trade sizes if present, else a
+    top-of-book proxy. Cleaned of NaN/inf and clipped non-negative."""
+    if "last_trade_qty" in df.columns and df["last_trade_qty"].notna().any():
+        volumes = df["last_trade_qty"].fillna(0).values.astype(float)
+    else:
+        volumes = (df["bid_qty_1"] + df["ask_qty_1"]).values.astype(float) / 2.0
+    volumes = np.nan_to_num(volumes, nan=0.0, posinf=0.0, neginf=0.0)
+    return np.clip(volumes, 0.0, None)
+
+
+def estimate_vpin_bucket_volume(df: pd.DataFrame, n_buckets_per_series: int = 50) -> float:
+    """Bucket size for VPIN, derived from *df*'s total volume.
+
+    Exposed separately so a walk-forward caller can size buckets from the
+    training segment alone: bucket volume is a full-sample statistic of
+    whatever frame it is given, so passing the whole series would leak
+    held-out volume into every VPIN value (including train rows).
+    """
+    total_vol = float(np.nansum(_vpin_volumes(df)))
+    return max(total_vol / float(n_buckets_per_series), 1.0)
+
+
 def compute_vpin(
     df: pd.DataFrame,
     bucket_volume: float | None = None,
@@ -167,22 +190,29 @@ def compute_vpin(
     """Compute VPIN using the flowrisk library.
 
     Trades are classified with the tick rule applied to mid_price changes.
-    Volume buckets are sized from *bucket_volume* (defaults to
-    median total volume / 50).
+    Volume buckets are sized from *bucket_volume*; when it is None the size
+    is derived from this frame's own total volume, which is a full-sample
+    statistic — pass a training-segment estimate from
+    :func:`estimate_vpin_bucket_volume` to keep the feature causal.
+
+    Rows before the first valid mid price yield NaN rather than being
+    back-filled from a future price.
 
     Returns a Series aligned to df.index.
     """
-    prices = df["mid_price"].values.astype(float)
-    # Use last_trade_qty if available, else proxy from top-of-book
-    if "last_trade_qty" in df.columns and df["last_trade_qty"].notna().any():
-        volumes = df["last_trade_qty"].fillna(0).values.astype(float)
-    else:
-        volumes = (df["bid_qty_1"] + df["ask_qty_1"]).values.astype(float) / 2.0
+    price_series = df["mid_price"].astype(float)
+    volumes = _vpin_volumes(df)
 
-    # Clean NaN/inf — flowrisk cannot handle them
-    prices = pd.Series(prices).ffill().bfill().values.astype(float)
-    volumes = np.nan_to_num(volumes, nan=0.0, posinf=0.0, neginf=0.0)
-    volumes = np.clip(volumes, 0.0, None)
+    # Forward-fill only: back-filling leading gaps would pull a future
+    # price into warm-up rows. Those rows are masked out of the result
+    # below instead.
+    first_valid = price_series.first_valid_index()
+    n_head_invalid = 0 if first_valid is None else int(df.index.get_loc(first_valid))
+    prices = price_series.ffill().values.astype(float)
+    if n_head_invalid > 0:
+        # flowrisk cannot ingest NaN; substitute the first valid price for
+        # the head rows and discard their VPIN output afterwards.
+        prices[:n_head_invalid] = prices[n_head_invalid]
 
     if np.sum(np.isfinite(prices)) < 10:
         logger.warning("Too few valid prices for VPIN")
@@ -190,16 +220,13 @@ def compute_vpin(
 
     # Break identical consecutive prices with sub-tick noise to avoid
     # NaN in flowrisk's PnL volatility estimate (division by zero when
-    # consecutive prices are equal from forward-fill resampling).
-    tick = np.median(np.abs(np.diff(prices[prices > 0])))
-    if tick == 0 or not np.isfinite(tick):
-        tick = 0.01
-    noise_scale = tick * 1e-6  # negligible relative to price
-    prices = prices + np.random.default_rng(42).normal(0, noise_scale, len(prices))
+    # consecutive prices are equal from forward-fill resampling). The
+    # scale is relative per row, so no full-sample statistic is involved.
+    noise_scale = np.maximum(np.abs(prices), 1.0) * 1e-10
+    prices = prices + np.random.default_rng(42).normal(0, 1.0, len(prices)) * noise_scale
 
     if bucket_volume is None:
-        total_vol = np.nansum(volumes)
-        bucket_volume = max(total_vol / 50.0, 1.0)
+        bucket_volume = estimate_vpin_bucket_volume(df)
 
     # Build the time-bar DataFrame expected by flowrisk
     time_bars = pd.DataFrame(
@@ -231,6 +258,9 @@ def compute_vpin(
         vpin_vals = vpin_vals[: len(df)]
 
     vpin_series = pd.Series(vpin_vals, index=df.index, name="vpin")
+    if n_head_invalid > 0:
+        # These rows had no observed price yet; nothing causal to report.
+        vpin_series.iloc[:n_head_invalid] = np.nan
     return vpin_series
 
 
@@ -391,6 +421,7 @@ def build_feature_matrix(
     zscore_window: int = ZSCORE_WINDOW,
     include_vpin: bool = True,
     standardize: bool = True,
+    vpin_bucket_volume: float | None = None,
 ) -> pd.DataFrame:
     """Assemble all features into a (T, F) matrix.
 
@@ -404,6 +435,10 @@ def build_feature_matrix(
         False when the consumer (e.g. HMM) applies its own standardisation;
         double-normalising removes the heteroscedasticity that the HMM needs
         to distinguish regimes.
+    vpin_bucket_volume : VPIN volume-bucket size.  When None it is derived
+        from *df*'s own total volume, a full-sample statistic; walk-forward
+        callers should pass an estimate from the training segment (see
+        :func:`estimate_vpin_bucket_volume`) so VPIN stays causal.
 
     Returns
     -------
@@ -421,7 +456,7 @@ def build_feature_matrix(
     # VPIN
     if include_vpin:
         try:
-            vpin = compute_vpin(df)
+            vpin = compute_vpin(df, bucket_volume=vpin_bucket_volume)
             parts.append(vpin)
         except Exception:
             logger.warning("VPIN computation failed; skipping", exc_info=True)

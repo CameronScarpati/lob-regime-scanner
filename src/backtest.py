@@ -66,10 +66,15 @@ def _annualized_sharpe(pnl: np.ndarray, bars_per_year: float) -> float:
 
 
 def _max_drawdown_fraction(pnl: np.ndarray) -> float:
-    """Max drawdown as a fraction of peak equity, from log-return PnL."""
+    """Max drawdown as a fraction of peak equity, from log-return PnL.
+
+    The equity curve is anchored at 1.0 before the first bar, so a series
+    that loses from bar one is measured against that starting capital
+    rather than against its own already-depressed first value.
+    """
     if len(pnl) == 0:
         return 0.0
-    equity = np.exp(np.cumsum(pnl))
+    equity = np.exp(np.concatenate([[0.0], np.cumsum(pnl)]))
     peak = np.maximum.accumulate(equity)
     drawdown = 1.0 - equity / peak
     return float(np.max(drawdown))

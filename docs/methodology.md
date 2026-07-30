@@ -85,7 +85,7 @@ computed over a trailing 300-second window. Higher λ indicates greater adverse 
 
 ### 1.5 Feature Matrix Assembly
 
-All features are assembled into a matrix **X** of shape (*T* × *F*), where *T* is the number of timestamps and *F* ≈ 30 features (9 OFI columns at 3 depths × 3 metrics, VPIN, 7 additional features, 4 realized volatility horizons, 10 autocorrelation lags).
+All features are assembled into a matrix **X** of shape (*T* × *F*), where *T* is the number of timestamps and *F* ≈ 36 features (9 simple OFI columns at 3 depths × 3 metrics, 6 canonical CKS OFI columns at 3 depths × 2 metrics, VPIN, 7 additional features, 4 realized volatility horizons, 10 autocorrelation lags).
 
 The feature module supports z-score standardization using a **trailing rolling window** (`build_feature_matrix(standardize=True)`). The default dashboard pipeline calls `build_feature_matrix(standardize=False)` and feeds the raw features to the HMM, whose `StandardScaler` is **fit on the walk-forward training segment only** (Section 4.1). Held-out rows are therefore scaled with train-segment statistics, never with future data. In the legacy fully in-sample mode (`train_frac=None`) the scaler still sees the whole series, which is lookahead; that mode exists for comparison, not for evaluation. NaN and ±∞ values from early-window periods are forward-filled and any remaining leading NaNs are set to zero — there is deliberately **no backward fill**, which would leak future values into warm-up rows.
 
@@ -134,15 +134,28 @@ Parameters θ = {**π**, **A**, {**μ**_k, **Σ**_k}} are estimated via the Expe
 
 We run EM for up to 200 iterations with convergence tolerance on the log-likelihood. The `RegimeDetector` supports any `hmmlearn` covariance type, but the **default dashboard pipeline uses `covariance_type="diag"`**. With a curated 8-feature subset, a full covariance HMM would carry on the order of 100+ free parameters across three states, so diagonal covariance is used to keep the parameter count manageable and the fit stable. Full covariance (Σ_k ∈ ℝ^{F×F}, as written above) is available but is not the default.
 
-### 2.3 State Decoding
+### 2.3 State Decoding: Smoothing vs Filtering
 
-Given the fitted model, we decode the most likely state sequence using the **Viterbi algorithm**, which finds:
+There are two distinct decodes here, and the difference matters more than it first appears.
+
+**Smoothed (Viterbi / forward-backward).** The Viterbi algorithm finds the single most likely *path*:
 
 ```
 ẑ*_{1:T} = argmax_{z_{1:T}} P(z_{1:T} | x_{1:T}, θ)
 ```
 
-via dynamic programming in O(*T* × *K*²) time. Posterior state probabilities at each timestep are obtained from the forward-backward algorithm.
+via dynamic programming in O(*T* × *K*²) time, and the forward-backward algorithm gives the smoothed marginals P(z_t | x_{1:T}). Both condition on the **entire** series, including observations *after* t. That makes them the best retrospective estimate, and it also makes them **unusable as a trading signal**: a volatility burst beginning after *t* can retroactively relabel bar *t*, so a backtest driven by them "knows" about moves that have not happened yet. `RegimeDetector.predict` / `.predict_proba` implement these, and the pipeline keeps the Viterbi path only for visualization (returned as `states_smoothed`).
+
+**Filtered (forward algorithm only).** The causal counterpart conditions only on the past:
+
+```
+alpha_t(k) ∝ P(x_t | z_t = k) · Σ_j A_{jk} · alpha_{t-1}(j),     alpha_1(k) ∝ pi_k · P(x_1 | z_1 = k)
+ẑ_t = argmax_k P(z_t = k | x_{1:t}, θ)
+```
+
+computed in log space with per-step normalization for numerical stability (`RegimeDetector.filtered_proba` / `.predict_filtered`). Because the recursion never looks forward, the estimate at *t* is **prefix-invariant**: appending later data cannot change it. That property is asserted directly in `tests/test_hmm.py::TestCausalDecode`, along with a companion test demonstrating that the Viterbi path is *not* prefix-invariant.
+
+**The pipeline trades the filtered decode.** On overlapping-regime data the two disagree materially (roughly a quarter of held-out bars in the test fixture; under 1% on the well-separated synthetic sample), and the disagreement is systematically flattering to the strategy, since retroactive Toxic labels let it "flatten before the crash." Fitting the model and scaler on the training segment alone (Section 4.1) fixes parameter and scaling leakage but does nothing about this, so the decode had to be made causal separately.
 
 ### 2.4 State Ordering
 
@@ -183,11 +196,12 @@ For each candidate *K*, we fit the HMM, compute BIC and AIC, and select the *K* 
 The backtest exists to visualize that detected regimes move with returns in a structured way, not as a production trading strategy. The default pipeline now implements the standard walk-forward hygiene:
 
 1. **Train/test split.** The HMM (including its feature scaler) is fit on the first 70% of the series (`train_frac=0.7`), then decodes the full series. Headline backtest statistics come from the held-out 30%; the in-sample segment's statistics are reported alongside for comparison.
-2. **Causal standardization.** Because the scaler is fit on the training segment only, no held-out observation is scaled using future statistics (Section 1.5).
-3. **Next-bar execution.** The position decided from information at bar *t* is held over bar *t + 1*; a signal never earns the bar it fires on.
-4. **Transaction costs.** Each unit of turnover is charged taker fees plus slippage (defaults: 5.5 + 0.5 bps per side). All headline metrics are net of costs; gross variants are reported alongside.
+2. **Causal standardization.** Because the scaler is fit on the training segment only, no held-out observation is scaled using future statistics (Section 1.5). VPIN's volume-bucket size, also a full-sample statistic, is estimated from the training segment for the same reason.
+3. **Causal decoding.** The states the backtest trades on come from the filtered (forward-only) decode, not the smoothed Viterbi path (Section 2.3), so a regime label never reflects an observation that had not happened yet.
+4. **Next-bar execution.** The position decided from information at bar *t* is held over bar *t + 1*; a signal never earns the bar it fires on.
+5. **Transaction costs.** Each unit of turnover is charged taker fees plus slippage (defaults: 5.5 + 0.5 bps per side). All headline metrics are net of costs; gross variants are reported alongside.
 
-What this still is not: a robust out-of-sample validation. The sample is a single instrument over a short window, fills are modeled naively (full fill at the next mid, no queue position or market impact), and one 70/30 split is not a rolling re-estimation. Passing `train_frac=None` reproduces the legacy fully in-sample behavior for comparison.
+What this still is not: a robust out-of-sample validation. The sample is a single instrument over a short window, fills are modeled naively (a full fill at the decision bar's mid with returns accruing from the next bar, no queue position, no partial fills, no market impact), and one 70/30 split is not a rolling re-estimation. Passing `train_frac=None` reproduces the legacy fully in-sample behavior for comparison. Inputs too small to support a split (fewer than roughly 30 rows) fall back to the in-sample path with a warning rather than failing inside the HMM fit.
 
 ### 4.2 Strategy Logic
 
@@ -202,7 +216,7 @@ The signal exploits regime transitions as entry/exit triggers:
 | Metric | Formula |
 |--------|---------|
 | Sharpe ratio | `(mean(pnl) / std(pnl)) × √(bars_per_year)`, on net-of-cost PnL (gross also reported) |
-| Max drawdown | `max(1 − equity_t / peak_equity_t)` with `equity = exp(cumsum(pnl))` — a fraction of peak equity |
+| Max drawdown | `max(1 − equity_t / peak_equity_t)` with `equity = exp(cumsum(pnl))` anchored at 1.0 before the first bar — a fraction of peak equity, so a series that loses from bar one is measured against starting capital |
 | Hit rate | Fraction of completed trades with positive net PnL |
 | Profit per trade | Mean net PnL across all completed trades |
 
@@ -215,7 +229,8 @@ The signal exploits regime transitions as entry/exit triggers:
 ### 5.1 Known Limitations
 
 - **One split, short sample:** The walk-forward design (Section 4.1) makes the headline metrics out-of-sample, but a single 70/30 split on a single instrument over a short window is not a robust validation. Rolling re-estimation over longer, more varied samples would be needed before believing any number.
-- **Naive fills:** The backtest assumes a full fill at the next bar's mid plus a fixed slippage assumption. Queue position, partial fills, and market impact are not modeled.
+- **Naive fills:** The backtest assumes a full fill at the decision bar's mid (returns accrue from the next bar) plus a flat slippage assumption. Queue position, partial fills, and market impact are not modeled.
+- **Filtered decode is noisier than the smoothed path:** Causal decoding (Section 2.3) is the correct choice for a signal, but it flips states more readily than Viterbi, which raises turnover and therefore costs. That is a real property of trading on live estimates, not an artifact to tune away.
 - **Curated feature subset, diagonal covariance:** Roughly 30 features are computed, but the HMM uses a curated subset of 8, fit with diagonal covariance (Section 2.2). Off-diagonal feature correlations are not modeled in the default pipeline.
 - **Coarse VPIN / Kyle's lambda inputs:** Without a trade-level feed, both are computed from snapshot proxies rather than true signed trade flow, so they are noisy estimates.
 - **Stationarity assumption:** The Gaussian HMM assumes stationary emission distributions within each regime. In practice, the parameters of each regime may drift over multi-day horizons (e.g., baseline spread levels change with market conditions). Periodic model re-fitting would be needed for production use.

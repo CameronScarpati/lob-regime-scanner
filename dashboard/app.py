@@ -251,20 +251,30 @@ def create_app(args: argparse.Namespace | None = None) -> Dash:
     hit_rate = bt_stats.get("hit_rate", 0.0)
     total_pnl = bt_stats.get("total_pnl", 0.0)
     is_walk_forward = "out_of_sample" in bt_stats
-    if is_walk_forward:
+    # Mock demo stats are plain random draws with no execution or cost model,
+    # so the caption must not claim cost-netting for them.
+    is_synthetic = bool(bt_stats.get("synthetic", False))
+    if is_synthetic:
+        bt_caption = (
+            "(Regime-conditional: enter Quiet→Trending, "
+            "flatten on Toxic · synthetic demo data, no execution or cost "
+            "model · illustrative)"
+        )
+        sharpe_label = "Sharpe (ann., demo)"
+    elif is_walk_forward:
         train_pct = round(bt_stats.get("train_frac", 0.7) * 100)
         bt_caption = (
             "(Regime-conditional: enter Quiet→Trending, "
             f"flatten on Toxic · held-out {100 - train_pct}% after a "
-            f"{train_pct}% walk-forward fit · net of fees and slippage · "
-            "illustrative)"
+            f"{train_pct}% walk-forward fit · next-bar execution, net of "
+            "fees and slippage · illustrative)"
         )
         sharpe_label = "Sharpe (OOS, net)"
     else:
         bt_caption = (
             "(Regime-conditional: enter Quiet→Trending, "
-            "flatten on Toxic · in-sample · net of fees and slippage · "
-            "illustrative)"
+            "flatten on Toxic · in-sample · next-bar execution, net of fees "
+            "and slippage · illustrative)"
         )
         sharpe_label = "Sharpe (ann., net)"
 

@@ -1,12 +1,14 @@
 # LOB Regime Scanner: Hidden-State Inference for Market Microstructure
 
 > **Note:** This document is the original project brief, the intended plan written
-> before and during the build. It is not a record of validated results. Where the
-> as-built implementation differs from this plan (it uses a global scaler rather
-> than rolling standardization, diagonal rather than full covariance, and is
-> evaluated in-sample with no train/test split), the README and
-> `docs/methodology.md` describe what the code actually does and list the
-> limitations. Treat any performance language below as a design aim, not a claim.
+> before and during the build. It is not a record of validated results, and it has
+> not been rewritten as the code evolved. Where the as-built implementation differs
+> from this plan (diagonal rather than full covariance; a train-segment scaler with
+> a single 70/30 walk-forward split rather than rolling standardization; a
+> cost-aware, next-bar, causally decoded backtest rather than the in-sample no-cost
+> sketch described in Phase 3.3), the README and `docs/methodology.md` describe what
+> the code actually does and list the current limitations. Treat any performance
+> language below as a design aim, not a claim.
 
 ## Project Brief
 
@@ -83,7 +85,7 @@ last_trade_side: str ("buy" | "sell")
 For the performance-critical path, build a C++ order book reconstructor:
 - Use a `std::map<double, double>` or flat sorted array for each side
 - Expose via pybind11 so Python can call `book.update(side, price, qty)` and `book.snapshot()`
-- Target: process 1M+ updates/second (demonstrate Speedway-level systems thinking)
+- Target: process 1M+ updates/second (demonstrate Speedway-level systems thinking). As built this is measured rather than assumed: `make bench` runs `benchmarks/bench_lob_engine.py` and reports a median over repeats, since run-to-run variance on shared hardware is large.
 - This is optional but impressive — start with pure Python, add C++ if time allows
 
 ---
@@ -136,7 +138,7 @@ Compute the following at each resampled timestamp:
 
 ### 2.4 Feature Matrix Assembly
 
-Stack all features into a matrix `X` of shape `(T, F)` where T = number of timestamps and F = number of features. The plan was to standardize each feature to zero mean, unit variance using a **rolling window** (not global, to avoid lookahead bias). As built, the default pipeline instead applies a single global scaler at HMM fit time, which carries lookahead; this is documented as a limitation in `docs/methodology.md` (Section 1.5). Handle NaN/inf values from early-window periods.
+Stack all features into a matrix `X` of shape `(T, F)` where T = number of timestamps and F = number of features. The plan was to standardize each feature to zero mean, unit variance using a **rolling window** (not global, to avoid lookahead bias). As built, the default pipeline applies a `StandardScaler` fit on the walk-forward training segment only, which is causal for the held-out segment without being a full rolling re-estimation; see `docs/methodology.md` (Sections 1.5 and 4.1). Handle NaN/inf values from early-window periods.
 
 ---
 
@@ -189,7 +191,7 @@ After decoding regimes, compute:
 
 ### 3.3 Simple Regime-Conditional Trading Signal
 
-Backtest a minimal strategy to check whether the detected regimes carry information about forward returns (in-sample, no costs):
+Backtest a minimal strategy to check whether the detected regimes carry information about forward returns. (As built this became stricter than planned: causally decoded states, next-bar execution, and taker fees plus slippage, with headline numbers on a held-out segment — see `docs/methodology.md` Section 4.1.)
 - When the model detects a transition from Quiet-to-Trending, enter a position in the direction of OFI
 - When the model detects Toxic/Stressed, flatten all positions
 - Compute Sharpe ratio, max drawdown, hit rate, and profit per trade
@@ -335,14 +337,14 @@ The interesting story is qualitative and should be framed as behavior observed o
 2. VPIN and Kyle's lambda tend to run higher in the highest-variance state, the direction adverse-selection theory predicts. These are coarse, proxy-based, and not validated on real flow.
 3. The HMM's transition matrix builds in persistence, so its regimes are more stable than a memoryless volatility threshold. This is a structural advantage, argued rather than tuned.
 
-Every quantitative statement should carry the in-sample / synthetic-data / no-cost caveats from the README's Scope and Limitations section.
+Every quantitative statement should carry the synthetic-data and short-single-split caveats from the README's Scope and Limitations section.
 
 ### 5.3 Methodology Document
 
 Write a 2-3 page methodology document covering:
 - Mathematical formulation of OFI, VPIN, and the Gaussian HMM
 - Model selection (BIC/AIC comparison)
-- Backtesting methodology (in-sample; the lookahead at standardization and the absence of a train/test split are documented as limitations)
+- Backtesting methodology (walk-forward split, causal decoding and standardization, next-bar execution, transaction costs; the remaining limitations are documented alongside)
 - Limitations and future work
 
 ---
