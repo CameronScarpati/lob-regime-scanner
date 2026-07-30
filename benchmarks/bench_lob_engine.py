@@ -29,6 +29,7 @@ N_EVENTS = 2_000_000
 EVENTS_PER_TIMESTAMP = 20
 N_LEVELS = 10
 SEED = 42
+N_REPEATS = 5  # throughput on a shared/cloud host varies a lot run to run
 
 
 def generate_events(
@@ -86,6 +87,16 @@ def bench_batch_reconstruct(n_events: int, rng: np.random.Generator) -> float:
     return n_events / elapsed
 
 
+def _summarize(name: str, rates: list[float]) -> None:
+    """Print median and range: a single run on a shared host is not stable."""
+    ordered = sorted(rates)
+    median = ordered[len(ordered) // 2]
+    print(
+        f"{name:<30}: {median:>12,.0f} updates/sec  "
+        f"(median of {len(rates)}; range {ordered[0]:,.0f}-{ordered[-1]:,.0f})"
+    )
+
+
 def main() -> int:
     if not CPP_AVAILABLE:
         print(
@@ -98,21 +109,23 @@ def main() -> int:
     rng = np.random.default_rng(SEED)
     print(
         f"LOB engine benchmark — {N_EVENTS:,} synthetic delta events, "
-        f"{EVENTS_PER_TIMESTAMP} events per timestamp, {N_LEVELS} snapshot levels.\n"
+        f"{EVENTS_PER_TIMESTAMP} events per timestamp, {N_LEVELS} snapshot levels, "
+        f"{N_REPEATS} repeats.\n"
     )
 
     # Warm-up run so first-call overhead is not measured
     bench_batch_reconstruct(10_000, rng)
 
-    per_call = bench_update_loop(min(N_EVENTS, 500_000), rng)
-    print(f"update() per-call from Python : {per_call:>12,.0f} updates/sec")
+    per_call = [bench_update_loop(min(N_EVENTS, 500_000), rng) for _ in range(N_REPEATS)]
+    _summarize("update() per-call from Python", per_call)
 
-    batch = bench_batch_reconstruct(N_EVENTS, rng)
-    print(f"batch_reconstruct() in C++    : {batch:>12,.0f} updates/sec")
+    batch = [bench_batch_reconstruct(N_EVENTS, rng) for _ in range(N_REPEATS)]
+    _summarize("batch_reconstruct() in C++", batch)
 
     print(
-        "\nSingle-threaded, synthetic events, hardware-dependent. "
-        "Indicative only — not a validated performance claim."
+        "\nSingle-threaded, synthetic events, hardware-dependent, and highly "
+        "variable run to run on shared hosts. Indicative only — not a "
+        "validated performance claim."
     )
     return 0
 

@@ -6,6 +6,7 @@ import pytest
 
 from src.features import (
     AUTOCORR_LAGS,
+    HMM_FEATURE_COLS,
     N_LEVELS,
     OFI_DEPTHS,
     RVOL_HORIZONS,
@@ -22,6 +23,7 @@ from src.features import (
     compute_trade_flow_aggression,
     compute_vpin,
     compute_weighted_mid,
+    estimate_vpin_bucket_volume,
 )
 
 # ---------------------------------------------------------------------------
@@ -219,6 +221,16 @@ class TestOFICKS:
         # r2: bid price up with NaN qty -> bid contributes 0, ask still -2
         assert ofi.iloc[2] == pytest.approx(2.0)
         assert np.isfinite(ofi.iloc[2:]).all()
+
+    def test_missing_level_contributes_zero(self) -> None:
+        """A fully absent level (NaN price and qty) must add exactly 0, not
+        propagate NaN into the depth sum."""
+        df = _make_cks_df()
+        for col in ["bid_price", "bid_qty", "ask_price", "ask_qty"]:
+            df[f"{col}_2"] = np.nan
+        ofi = compute_ofi_cks(df, depths=[1, 2])
+        np.testing.assert_allclose(ofi["ofi_cks_2"].iloc[1:], ofi["ofi_cks_1"].iloc[1:])
+        assert np.isfinite(ofi["ofi_cks_2"].iloc[1:]).all()
 
 
 # ---------------------------------------------------------------------------
@@ -466,3 +478,85 @@ class TestBuildFeatureMatrix:
         fm = build_feature_matrix(small_df, include_vpin=False)
         assert fm.shape[0] == len(small_df)
         assert not fm.isna().any().any()
+
+
+# ---------------------------------------------------------------------------
+# Causality of the feature matrix
+# ---------------------------------------------------------------------------
+
+
+class TestFeatureCausality:
+    """No feature row may draw on data from a later row."""
+
+    def test_leading_nan_is_neutral_not_back_filled(self, snapshot_df: pd.DataFrame) -> None:
+        """Row 0 OFI is undefined (no previous book). It must become the
+        neutral 0.0 placeholder, never row 1's future value."""
+        fm = build_feature_matrix(snapshot_df, include_vpin=False)
+        raw_row1_proxy = compute_ofi(snapshot_df, depths=[1])["ofi_1"].iloc[1]
+        raw_row1_cks = compute_ofi_cks(snapshot_df, depths=[1])["ofi_cks_1"].iloc[1]
+
+        assert fm["ofi_1"].iloc[0] == 0.0
+        assert fm["ofi_cks_1"].iloc[0] == 0.0
+        # Guard against a re-introduced bfill, which would copy row 1 back
+        assert fm["ofi_1"].iloc[0] != pytest.approx(raw_row1_proxy)
+        assert fm["ofi_cks_1"].iloc[0] != pytest.approx(raw_row1_cks)
+
+    def test_future_rows_do_not_change_past_features(self, snapshot_df: pd.DataFrame) -> None:
+        """Truncating the input must not change any surviving feature row."""
+        cut = 300
+        full = build_feature_matrix(snapshot_df, include_vpin=False)
+        prefix = build_feature_matrix(snapshot_df.iloc[:cut].copy(), include_vpin=False)
+        pd.testing.assert_frame_equal(full.iloc[:cut], prefix)
+
+    def test_vpin_bucket_volume_is_injectable(self, snapshot_df: pd.DataFrame) -> None:
+        """The pipeline sizes VPIN buckets from the training segment, so the
+        parameter must actually reach compute_vpin and change the result."""
+        train_bucket = estimate_vpin_bucket_volume(snapshot_df.iloc[:350])
+        full_bucket = estimate_vpin_bucket_volume(snapshot_df)
+        assert train_bucket < full_bucket
+
+        with_train = build_feature_matrix(
+            snapshot_df, include_vpin=True, vpin_bucket_volume=train_bucket
+        )
+        with_full = build_feature_matrix(
+            snapshot_df, include_vpin=True, vpin_bucket_volume=full_bucket
+        )
+        assert not np.allclose(with_train["vpin"].values, with_full["vpin"].values)
+
+    def test_estimate_vpin_bucket_volume_uses_only_given_rows(
+        self, snapshot_df: pd.DataFrame
+    ) -> None:
+        head = snapshot_df.iloc[:250].copy()
+        inflated = snapshot_df.copy()
+        inflated.loc[250:, "last_trade_qty"] *= 100
+        assert estimate_vpin_bucket_volume(head) == pytest.approx(
+            estimate_vpin_bucket_volume(inflated.iloc[:250])
+        )
+
+    def test_vpin_head_without_price_is_nan_not_back_filled(
+        self, snapshot_df: pd.DataFrame
+    ) -> None:
+        """Rows before the first observed price have no causal VPIN value."""
+        df = snapshot_df.copy()
+        df.loc[:4, "mid_price"] = np.nan
+        vpin = compute_vpin(df)
+        assert vpin.iloc[:5].isna().all()
+
+
+# ---------------------------------------------------------------------------
+# HMM feature contract
+# ---------------------------------------------------------------------------
+
+
+class TestHMMFeatureCols:
+    def test_all_hmm_features_are_produced(self, snapshot_df: pd.DataFrame) -> None:
+        """A rename in the feature module must not silently shrink the HMM
+        input: pipeline.py filters HMM_FEATURE_COLS against the matrix."""
+        fm = build_feature_matrix(snapshot_df, include_vpin=True)
+        missing = set(HMM_FEATURE_COLS) - set(fm.columns)
+        assert not missing, f"HMM features absent from feature matrix: {missing}"
+
+    def test_hmm_uses_canonical_ofi(self) -> None:
+        """The canonical CKS OFI is the model input; the proxy is not."""
+        assert "ofi_cks_1" in HMM_FEATURE_COLS
+        assert "ofi_1" not in HMM_FEATURE_COLS

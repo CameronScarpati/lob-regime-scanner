@@ -9,6 +9,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from src.backtest import _max_drawdown_fraction
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -234,11 +236,9 @@ def generate_backtest_stats(cumulative_pnl: np.ndarray) -> dict:
     """Compute summary statistics from cumulative PnL for the statistics bar."""
     pnl_diff = np.diff(cumulative_pnl, prepend=0)
     sharpe = float(np.mean(pnl_diff) / max(np.std(pnl_diff), 1e-10) * np.sqrt(365 * 86400))
-    # Fractional drawdown on a compounded equity curve, matching src/backtest.py
-    equity = np.exp(cumulative_pnl)
-    peak = np.maximum.accumulate(equity)
-    drawdown = 1.0 - equity / peak
-    max_dd = float(np.max(drawdown)) if len(drawdown) > 0 else 0.0
+    # Fractional drawdown on a compounded equity curve anchored at 1.0,
+    # matching src.backtest._max_drawdown_fraction
+    max_dd = _max_drawdown_fraction(pnl_diff)
     n_trades = int(np.sum(np.abs(np.diff(np.sign(pnl_diff))) > 0))
     hit_rate = float(np.mean(pnl_diff[pnl_diff != 0] > 0)) if np.any(pnl_diff != 0) else 0.0
     return {
@@ -247,6 +247,9 @@ def generate_backtest_stats(cumulative_pnl: np.ndarray) -> dict:
         "n_trades": max(n_trades, 1),
         "hit_rate": round(hit_rate, 3),
         "total_pnl": round(float(cumulative_pnl[-1]), 4),
+        # Synthetic PnL draws with no execution or cost model; the dashboard
+        # keys its caption off this so demo mode does not claim cost-netting.
+        "synthetic": True,
     }
 
 

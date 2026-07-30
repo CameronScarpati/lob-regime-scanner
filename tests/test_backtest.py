@@ -152,6 +152,20 @@ class TestMetrics:
         dd = _max_drawdown_fraction(pnl)
         assert dd == pytest.approx(0.2)
 
+    def test_max_drawdown_measured_from_starting_capital(self):
+        """A series that loses from bar one draws down against the 1.0 start,
+        not against its own already-depressed first value."""
+        assert _max_drawdown_fraction(np.array([np.log(0.8)])) == pytest.approx(0.2)
+        assert _max_drawdown_fraction(np.array([np.log(0.5), np.log(1.01)])) == pytest.approx(0.5)
+
+    def test_max_drawdown_all_negative_series(self):
+        pnl = np.full(5, -0.1)
+        # equity ends at exp(-0.5) = 0.6065, peak is the 1.0 start
+        assert _max_drawdown_fraction(pnl) == pytest.approx(1.0 - np.exp(-0.5))
+
+    def test_max_drawdown_zero_when_monotonic_gain(self):
+        assert _max_drawdown_fraction(np.full(5, 0.01)) == pytest.approx(0.0)
+
     def test_max_drawdown_in_unit_interval(self):
         states = [QUIET] + [TRENDING] * 50 + [QUIET]
         rng = np.random.default_rng(1)
@@ -172,3 +186,59 @@ class TestMetrics:
         assert result.n_trades == 1
         # Exit cost charged on the forced close
         assert result.total_costs == pytest.approx(2 * 5.0 / 10_000.0)
+
+
+class TestPositionSemantics:
+    """Behaviors a refactor could silently change."""
+
+    def test_zero_ofi_goes_short(self):
+        """Documented tie-break: an exactly-zero smoothed OFI enters short.
+        Pinned so a np.sign() refactor (which would yield a phantom
+        zero-size position) cannot slip through."""
+        states = [QUIET, TRENDING, TRENDING, QUIET, QUIET]
+        returns = [0.0, 0.0, 0.01, 0.01, 0.0]
+        # Stop disabled so this isolates the entry direction
+        result = _run(states, returns, np.zeros(5), stop_loss=1.0)
+        assert result.n_trades == 1
+        # Short into a rising market loses both earned bars
+        assert result.total_pnl == pytest.approx(-0.02)
+
+    def test_direction_locked_at_entry(self):
+        """OFI flipping sign mid-trade must not flip the position: direction
+        is decided once at entry, and a flip would be untaxed turnover."""
+        states = [QUIET] + [TRENDING] * 5 + [QUIET]
+        returns = [0.0, 0.0, 0.01, 0.01, 0.01, 0.01, 0.01]
+        ofi = np.array([1.0, 1.0, 1.0, -50.0, -50.0, -50.0, -50.0])
+        result = _run(states, returns, ofi)
+        assert result.n_trades == 1
+        # Still long through the post-flip bars
+        assert result.pnl[4] == pytest.approx(0.01)
+        assert result.total_pnl > 0
+
+    def test_costed_stop_loss_accounts_for_entry_cost(self):
+        """The stop measures cumulative trade PnL, which starts at minus the
+        entry cost, so it fires that much earlier than the raw market move."""
+        states = [QUIET] + [TRENDING] * 10
+        returns = [0.0] + [-0.0005] * 10
+        result = _run(
+            states,
+            returns,
+            np.ones(11),
+            fee_bps=5.5,
+            slippage_bps=0.5,
+            stop_loss=0.002,
+            cooldown_bars=100,
+        )
+        assert result.n_trades == 1
+        entry_cost = 6.0 / 10_000.0
+        # Bars earned after entry at t=1, until cumulative net PnL breaches
+        # the stop; the last non-zero PnL bar is the exit bar.
+        last_earning_bar = int(np.max(np.nonzero(result.pnl)[0]))
+        market_loss = 0.0005 * (last_earning_bar - 1)
+        assert market_loss + entry_cost >= 0.002
+        assert market_loss < 0.002  # would not have stopped without the cost
+
+    def test_no_trade_leaves_pnl_untouched_by_costs(self):
+        result = _run([QUIET] * 50, np.full(50, 0.01), np.ones(50), fee_bps=100.0)
+        assert result.total_costs == 0.0
+        assert result.total_pnl == 0.0

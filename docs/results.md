@@ -83,14 +83,22 @@ A deliberately simple regime-conditional rule is included: enter on a
 Quiet-to-Trending transition in the order-flow direction, flatten on Toxic
 detection. It is a visualization aid, not a strategy.
 
-The backtest applies next-bar execution, charges taker fees plus slippage on
-every unit of turnover, annualizes from the actual bar interval, and reports
-its headline statistics on the held-out walk-forward segment (with in-sample
-and gross-of-cost figures alongside). Even so, one 70/30 split on a short
-single-instrument sample with naive fill assumptions is not a validation, so
-no Sharpe ratio is reproduced here. The purpose of the backtest is to show
+The backtest runs on causally decoded states (filtered, not smoothed — see
+methodology Section 2.3), applies next-bar execution, charges taker fees plus
+slippage on every unit of turnover, annualizes from the actual bar interval,
+and reports its headline statistics on the held-out walk-forward segment (with
+in-sample and gross-of-cost figures alongside). Even so, one 70/30 split on a
+short single-instrument sample with naive fill assumptions is not a validation,
+so no Sharpe ratio is reproduced here. The purpose of the backtest is to show
 that the regime labels move with returns in a structured way, not to claim
 alpha.
+
+One qualitative result is worth stating plainly, because it is the most useful
+thing the exercise produced: on the sample data the naive regime-flipping rule
+looks positive **gross** of costs and turns **negative once fees and slippage
+are charged**. A rule that re-enters on every Quiet-to-Trending transition
+simply does not clear roughly 6 bps per side. That sign flip, not any Sharpe
+number, is the honest takeaway.
 
 ---
 
