@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 from hmmlearn.hmm import GaussianHMM
 from scipy import stats as sp_stats
+from scipy.special import logsumexp
 from sklearn.preprocessing import StandardScaler
 
 # Default regime labels
@@ -229,6 +230,13 @@ class RegimeDetector:
     def predict(self, X: pd.DataFrame | np.ndarray) -> np.ndarray:
         """Decode most likely state sequence (Viterbi).
 
+        **This is a smoother, not a filter.** Viterbi maximizes the joint
+        likelihood of the whole path, so the label at time *t* depends on
+        observations after *t*. It is the best retrospective estimate and
+        is appropriate for visualization and post-hoc analysis, but using
+        it as a trading signal is lookahead bias. Use
+        :meth:`predict_filtered` for anything that must be causal.
+
         Returns
         -------
         states : ndarray of shape (n_samples,)
@@ -240,7 +248,11 @@ class RegimeDetector:
         return self.model.predict(arr)
 
     def predict_proba(self, X: pd.DataFrame | np.ndarray) -> np.ndarray:
-        """Posterior state probabilities at each timestep.
+        """Smoothed posterior state probabilities at each timestep.
+
+        Forward-backward posteriors: P(z_t = k | o_1, ..., o_T) uses the
+        **whole** sequence, so like :meth:`predict` these are smoothed and
+        non-causal. Use :meth:`filtered_proba` for causal estimates.
 
         Returns
         -------
@@ -250,6 +262,58 @@ class RegimeDetector:
             raise RuntimeError("Model has not been fitted. Call fit() first.")
         arr = self._to_array(X)
         return self.model.predict_proba(arr)
+
+    def filtered_proba(self, X: pd.DataFrame | np.ndarray) -> np.ndarray:
+        """Causal (filtered) posterior state probabilities.
+
+        Runs the scaled forward algorithm only, so the value at time *t* is
+        P(z_t = k | o_1, ..., o_t) and uses **no observation after t**:
+
+            alpha_1 ∝ pi ⊙ b(o_1)
+            alpha_t ∝ b(o_t) ⊙ (A^T alpha_{t-1})
+
+        This is what a live system could compute at time *t*, which makes it
+        the correct input for a backtest signal. Its prefix-invariance (the
+        estimate at *t* never changes when later data arrives) is the
+        property :meth:`predict_proba` and :meth:`predict` lack.
+
+        Returns
+        -------
+        probs : ndarray of shape (n_samples, n_states)
+        """
+        if not self._fitted:
+            raise RuntimeError("Model has not been fitted. Call fit() first.")
+        if len(X) == 0:
+            return np.empty((0, self.n_states))
+        arr = self._to_array(X)
+
+        log_b = self.model._compute_log_likelihood(arr)
+        with np.errstate(divide="ignore"):
+            log_pi = np.log(self.model.startprob_)
+            log_A = np.log(self.model.transmat_)
+
+        log_alpha = np.empty_like(log_b)
+        log_alpha[0] = log_pi + log_b[0]
+        log_alpha[0] -= logsumexp(log_alpha[0])
+        for t in range(1, log_b.shape[0]):
+            log_alpha[t] = log_b[t] + logsumexp(log_alpha[t - 1][:, None] + log_A, axis=0)
+            log_alpha[t] -= logsumexp(log_alpha[t])
+        return np.exp(log_alpha)
+
+    def predict_filtered(self, X: pd.DataFrame | np.ndarray) -> np.ndarray:
+        """Causal state estimates: argmax of the filtered posterior.
+
+        The causal counterpart to :meth:`predict`. Use this for backtest
+        signals; see :meth:`filtered_proba` for the mechanics.
+
+        Returns
+        -------
+        states : ndarray of shape (n_samples,)
+        """
+        probs = self.filtered_proba(X)
+        if probs.shape[0] == 0:
+            return np.empty(0, dtype=int)
+        return np.argmax(probs, axis=1).astype(int)
 
     def score(self, X: pd.DataFrame | np.ndarray) -> float:
         """Log-likelihood of the data under the fitted model."""

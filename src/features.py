@@ -1,8 +1,10 @@
 """Microstructure feature computations.
 
-Computes OFI (multi-level), VPIN, book imbalance, weighted mid-price,
-spread, Kyle's lambda, trade flow aggression, cancellation ratio,
-realized volatility, and return autocorrelation.
+Computes OFI (multi-level, both a simple volume-delta proxy and the
+canonical price-conditioned Cont-Kukanov-Stoikov formulation), VPIN,
+book imbalance, weighted mid-price, spread, Kyle's lambda, trade flow
+aggression, cancellation ratio, realized volatility, and return
+autocorrelation.
 """
 
 import logging
@@ -84,9 +86,100 @@ def compute_ofi(df: pd.DataFrame, depths: list[int] | None = None) -> pd.DataFra
     return result
 
 
+def compute_ofi_cks(df: pd.DataFrame, depths: list[int] | None = None) -> pd.DataFrame:
+    """Canonical Cont-Kukanov-Stoikov order flow imbalance.
+
+    Unlike the simple proxy in :func:`compute_ofi` (change in total resting
+    volume), the canonical formulation conditions each level's contribution
+    on the direction of the price move at that level (Cont, Kukanov &
+    Stoikov, 2014, eq. for e_n):
+
+        e^bid_t = q^bid_t * 1{p^bid_t >= p^bid_{t-1}}
+                  - q^bid_{t-1} * 1{p^bid_t <= p^bid_{t-1}}
+        e^ask_t = q^ask_t * 1{p^ask_t <= p^ask_{t-1}}
+                  - q^ask_{t-1} * 1{p^ask_t >= p^ask_{t-1}}
+
+        OFI_t = sum over levels of (e^bid_t - e^ask_t)
+
+    A bid price improvement counts the full new queue as buying pressure; a
+    bid price drop counts the full vanished queue as selling pressure; an
+    unchanged price contributes the net queue-size change. The paper defines
+    this at the best level; applying it per level and summing across the top
+    *depth* levels is the standard multi-level extension.
+
+    Parameters
+    ----------
+    df : DataFrame with columns bid_price_i, bid_qty_i, ask_price_i,
+        ask_qty_i for i in 1..max(depths).
+    depths : list of depth levels (default [1, 5, 10]).
+
+    Returns
+    -------
+    DataFrame indexed like *df* with columns:
+        ofi_cks_{d}, ofi_cks_{d}_zscore  for each depth d.
+        The first row is NaN (no previous book state).
+    """
+    if depths is None:
+        depths = OFI_DEPTHS
+
+    max_depth = max(depths)
+    level_ofi: dict[int, np.ndarray] = {}
+    for i in range(1, max_depth + 1):
+        bp = df[f"bid_price_{i}"].values
+        ap = df[f"ask_price_{i}"].values
+        # Missing levels carry NaN qty; treat an absent queue as size 0.
+        bq = np.nan_to_num(df[f"bid_qty_{i}"].values.astype(np.float64), nan=0.0)
+        aq = np.nan_to_num(df[f"ask_qty_{i}"].values.astype(np.float64), nan=0.0)
+
+        bp_prev = np.roll(bp, 1)
+        bq_prev = np.roll(bq, 1)
+        ap_prev = np.roll(ap, 1)
+        aq_prev = np.roll(aq, 1)
+
+        # NaN comparisons evaluate False, so missing levels contribute 0.
+        with np.errstate(invalid="ignore"):
+            e_bid = np.where(bp >= bp_prev, bq, 0.0) - np.where(bp <= bp_prev, bq_prev, 0.0)
+            e_ask = np.where(ap <= ap_prev, aq, 0.0) - np.where(ap >= ap_prev, aq_prev, 0.0)
+        contrib = e_bid - e_ask
+        contrib[0] = np.nan  # no previous book state at the first row
+        level_ofi[i] = contrib
+
+    result = pd.DataFrame(index=df.index)
+    for d in depths:
+        total = np.sum([level_ofi[i] for i in range(1, d + 1)], axis=0)
+        ofi = pd.Series(total, index=df.index)
+        result[f"ofi_cks_{d}"] = ofi
+        result[f"ofi_cks_{d}_zscore"] = _rolling_zscore(ofi)
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # 2.2  VPIN (flowrisk)
 # ---------------------------------------------------------------------------
+
+
+def _vpin_volumes(df: pd.DataFrame) -> np.ndarray:
+    """Trade volumes for VPIN: real trade sizes if present, else a
+    top-of-book proxy. Cleaned of NaN/inf and clipped non-negative."""
+    if "last_trade_qty" in df.columns and df["last_trade_qty"].notna().any():
+        volumes = df["last_trade_qty"].fillna(0).values.astype(float)
+    else:
+        volumes = (df["bid_qty_1"] + df["ask_qty_1"]).values.astype(float) / 2.0
+    volumes = np.nan_to_num(volumes, nan=0.0, posinf=0.0, neginf=0.0)
+    return np.clip(volumes, 0.0, None)
+
+
+def estimate_vpin_bucket_volume(df: pd.DataFrame, n_buckets_per_series: int = 50) -> float:
+    """Bucket size for VPIN, derived from *df*'s total volume.
+
+    Exposed separately so a walk-forward caller can size buckets from the
+    training segment alone: bucket volume is a full-sample statistic of
+    whatever frame it is given, so passing the whole series would leak
+    held-out volume into every VPIN value (including train rows).
+    """
+    total_vol = float(np.nansum(_vpin_volumes(df)))
+    return max(total_vol / float(n_buckets_per_series), 1.0)
 
 
 def compute_vpin(
@@ -97,22 +190,29 @@ def compute_vpin(
     """Compute VPIN using the flowrisk library.
 
     Trades are classified with the tick rule applied to mid_price changes.
-    Volume buckets are sized from *bucket_volume* (defaults to
-    median total volume / 50).
+    Volume buckets are sized from *bucket_volume*; when it is None the size
+    is derived from this frame's own total volume, which is a full-sample
+    statistic — pass a training-segment estimate from
+    :func:`estimate_vpin_bucket_volume` to keep the feature causal.
+
+    Rows before the first valid mid price yield NaN rather than being
+    back-filled from a future price.
 
     Returns a Series aligned to df.index.
     """
-    prices = df["mid_price"].values.astype(float)
-    # Use last_trade_qty if available, else proxy from top-of-book
-    if "last_trade_qty" in df.columns and df["last_trade_qty"].notna().any():
-        volumes = df["last_trade_qty"].fillna(0).values.astype(float)
-    else:
-        volumes = (df["bid_qty_1"] + df["ask_qty_1"]).values.astype(float) / 2.0
+    price_series = df["mid_price"].astype(float)
+    volumes = _vpin_volumes(df)
 
-    # Clean NaN/inf — flowrisk cannot handle them
-    prices = pd.Series(prices).ffill().bfill().values.astype(float)
-    volumes = np.nan_to_num(volumes, nan=0.0, posinf=0.0, neginf=0.0)
-    volumes = np.clip(volumes, 0.0, None)
+    # Forward-fill only: back-filling leading gaps would pull a future
+    # price into warm-up rows. Those rows are masked out of the result
+    # below instead.
+    first_valid = price_series.first_valid_index()
+    n_head_invalid = 0 if first_valid is None else int(df.index.get_loc(first_valid))
+    prices = price_series.ffill().values.astype(float)
+    if n_head_invalid > 0:
+        # flowrisk cannot ingest NaN; substitute the first valid price for
+        # the head rows and discard their VPIN output afterwards.
+        prices[:n_head_invalid] = prices[n_head_invalid]
 
     if np.sum(np.isfinite(prices)) < 10:
         logger.warning("Too few valid prices for VPIN")
@@ -120,16 +220,13 @@ def compute_vpin(
 
     # Break identical consecutive prices with sub-tick noise to avoid
     # NaN in flowrisk's PnL volatility estimate (division by zero when
-    # consecutive prices are equal from forward-fill resampling).
-    tick = np.median(np.abs(np.diff(prices[prices > 0])))
-    if tick == 0 or not np.isfinite(tick):
-        tick = 0.01
-    noise_scale = tick * 1e-6  # negligible relative to price
-    prices = prices + np.random.default_rng(42).normal(0, noise_scale, len(prices))
+    # consecutive prices are equal from forward-fill resampling). The
+    # scale is relative per row, so no full-sample statistic is involved.
+    noise_scale = np.maximum(np.abs(prices), 1.0) * 1e-10
+    prices = prices + np.random.default_rng(42).normal(0, 1.0, len(prices)) * noise_scale
 
     if bucket_volume is None:
-        total_vol = np.nansum(volumes)
-        bucket_volume = max(total_vol / 50.0, 1.0)
+        bucket_volume = estimate_vpin_bucket_volume(df)
 
     # Build the time-bar DataFrame expected by flowrisk
     time_bars = pd.DataFrame(
@@ -161,6 +258,9 @@ def compute_vpin(
         vpin_vals = vpin_vals[: len(df)]
 
     vpin_series = pd.Series(vpin_vals, index=df.index, name="vpin")
+    if n_head_invalid > 0:
+        # These rows had no observed price yet; nothing causal to report.
+        vpin_series.iloc[:n_head_invalid] = np.nan
     return vpin_series
 
 
@@ -321,6 +421,7 @@ def build_feature_matrix(
     zscore_window: int = ZSCORE_WINDOW,
     include_vpin: bool = True,
     standardize: bool = True,
+    vpin_bucket_volume: float | None = None,
 ) -> pd.DataFrame:
     """Assemble all features into a (T, F) matrix.
 
@@ -334,6 +435,10 @@ def build_feature_matrix(
         False when the consumer (e.g. HMM) applies its own standardisation;
         double-normalising removes the heteroscedasticity that the HMM needs
         to distinguish regimes.
+    vpin_bucket_volume : VPIN volume-bucket size.  When None it is derived
+        from *df*'s own total volume, a full-sample statistic; walk-forward
+        callers should pass an estimate from the training segment (see
+        :func:`estimate_vpin_bucket_volume`) so VPIN stays causal.
 
     Returns
     -------
@@ -345,10 +450,13 @@ def build_feature_matrix(
     ofi = compute_ofi(df)
     parts.append(ofi)
 
+    # Canonical Cont-Kukanov-Stoikov OFI (price-conditioned per level)
+    parts.append(compute_ofi_cks(df))
+
     # VPIN
     if include_vpin:
         try:
-            vpin = compute_vpin(df)
+            vpin = compute_vpin(df, bucket_volume=vpin_bucket_volume)
             parts.append(vpin)
         except Exception:
             logger.warning("VPIN computation failed; skipping", exc_info=True)
@@ -389,9 +497,12 @@ def build_feature_matrix(
             features[col] = _rolling_zscore(features[col], window=zscore_window)
 
     # ---- NaN / inf handling -----------------------------------------------
+    # Forward-fill only: backward-filling would leak future values into the
+    # warm-up rows (lookahead). Remaining leading NaNs (rolling-window and
+    # VPIN warm-up) are set to 0.0, which is causal but means the earliest
+    # rows carry a neutral placeholder rather than a real signal.
     features.replace([np.inf, -np.inf], np.nan, inplace=True)
     features.ffill(inplace=True)
-    features.bfill(inplace=True)
     features.fillna(0.0, inplace=True)
 
     logger.info(
@@ -404,8 +515,10 @@ def build_feature_matrix(
 
 # Curated subset of features for HMM regime detection.
 # Keeping this small avoids the curse of dimensionality with full-covariance HMMs.
+# ofi_cks_1 is the canonical price-conditioned OFI; the simple proxy (ofi_1)
+# is still computed for comparison and dashboard display.
 HMM_FEATURE_COLS = [
-    "ofi_1",
+    "ofi_cks_1",
     "vpin",
     "book_imbalance",
     "spread_bps",
