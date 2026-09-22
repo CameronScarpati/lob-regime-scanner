@@ -1,4 +1,4 @@
-# LOB Regime Scanner: Hidden-State Inference for Market Microstructure
+# LOB Regime Scanner: Hidden-State Inference for Limit Order Books
 
 > **Note:** This document is the original project brief, the intended plan written
 > before and during the build. It is not a record of validated results, and it has
@@ -12,10 +12,9 @@
 
 ## Project Brief
 
-Build an end-to-end market microstructure analytics platform that ingests limit order book (LOB) data, computes order flow features, detects hidden market regimes using a Hidden Markov Model, and renders everything in an interactive multi-panel dashboard. The project demonstrates the same core skill — inferring hidden states from noisy signals — that I used in my undergraduate research (DevStats, a CRA award-winning academic integrity system), applied to the domain of quantitative finance.
+Build an end-to-end order book analytics platform that ingests limit order book (LOB) data, computes order flow features, detects hidden market regimes using a Hidden Markov Model, and renders everything in an interactive multi-panel dashboard. The underlying problem is inferring hidden states from noisy signals.
 
-**Target audience:** Quant research recruiters at Two Sigma, Millennium, DE Shaw, and similar firms.
-**Author:** Cameron Scarpati (incoming CMU MSCF, former Morgan Stanley Speedway team)
+**Author:** Cameron Scarpati
 **Stack:** Python (primary), C++ (performance-critical LOB reconstruction), Plotly Dash (dashboard)
 
 ---
@@ -85,8 +84,8 @@ last_trade_side: str ("buy" | "sell")
 For the performance-critical path, build a C++ order book reconstructor:
 - Use a `std::map<double, double>` or flat sorted array for each side
 - Expose via pybind11 so Python can call `book.update(side, price, qty)` and `book.snapshot()`
-- Target: process 1M+ updates/second (demonstrate Speedway-level systems thinking). As built this is measured rather than assumed: `make bench` runs `benchmarks/bench_lob_engine.py` and reports a median over repeats, since run-to-run variance on shared hardware is large.
-- This is optional but impressive — start with pure Python, add C++ if time allows
+- Target: process 1M+ updates/second. As built this is measured rather than assumed: `make bench` runs `benchmarks/bench_lob_engine.py` and reports a median over repeats, since run-to-run variance on shared hardware is large.
+- This is optional: start with pure Python, add C++ if time allows
 
 ---
 
@@ -212,7 +211,7 @@ Backtest a minimal strategy to check whether the detected regimes carry informat
 
 ### 4.1 Technology Stack
 
-Use **Plotly Dash** for the dashboard framework. It's Python-native (good for learning), produces professional interactive visualizations, and deploys easily.
+Use **Plotly Dash** for the dashboard framework. It is Python-native (good for learning), produces professional interactive visualizations, and deploys easily.
 
 ```
 pip install dash plotly pandas numpy hmmlearn flowrisk pybind11
@@ -234,7 +233,7 @@ This is the centerpiece. Render a Bookmap-style heatmap:
 
 Use `plotly.graph_objects.Heatmap` with `zsmooth='best'` for smooth rendering. For the regime overlay, use `plotly.graph_objects.Scatter` with `fill='tozeroy'` in a subplot with shared x-axis.
 
-**Reference visualization:** Bookmap (bookmap.com) — your free version of this is impressive.
+**Reference visualization:** Bookmap (bookmap.com).
 
 #### Panel 2: Regime State Probabilities (Top Right)
 
@@ -256,7 +255,7 @@ A 3D surface plot showing order book depth evolution:
 - Use `plotly.graph_objects.Surface`
 - Allow rotation/zoom interaction
 
-This is the "wow factor" visualization — seeing the order book as a landscape that shifts and morphs over time is visually stunning and immediately intuitive.
+Seeing the order book as a landscape that shifts over time makes depth dynamics immediately intuitive.
 
 #### Panel 4: Toxicity & Diagnostics (Bottom Right)
 
@@ -323,9 +322,9 @@ lob-regime-scanner/
 
 ### 5.1 README.md
 
-The README is the first thing a recruiter sees. It should include:
-1. A single compelling screenshot of the dashboard at the top
-2. One-paragraph summary: "An interactive market microstructure analytics platform that uses Hidden Markov Models to detect latent regimes in cryptocurrency order book data. Built as a bridge between my undergraduate research in hidden-state inference (DevStats, CRA Award) and quantitative finance."
+The README should include:
+1. A single screenshot of the dashboard at the top
+2. One-paragraph summary: "An interactive analytics platform that uses Hidden Markov Models to detect latent regimes in cryptocurrency order book data."
 3. Key findings (2-3 bullets)
 4. Setup instructions
 5. Architecture diagram
@@ -378,7 +377,7 @@ pytest>=7.4         # for tests
 ### Stretch Goals (If Time Permits)
 1. **Real-time mode:** Connect to Bybit WebSocket feed and run the HMM regime detector live, updating the dashboard every second
 2. **Multi-asset comparison:** Run the same regime detector on BTC, ETH, and SOL simultaneously and visualize regime synchronization across assets (when do all three enter "toxic" mode at once?)
-3. **C++ Viterbi decoder:** Implement the Viterbi algorithm in C++ with pybind11 bindings — demonstrate that regime decoding runs in < 1μs per timestamp (Speedway-level performance on a finance problem)
+3. **C++ Viterbi decoder:** Implement the Viterbi algorithm in C++ with pybind11 bindings and measure whether regime decoding runs in < 1μs per timestamp
 4. **Regime-conditional optimal execution:** Given a parent order to execute, simulate how a TWAP vs. regime-aware execution strategy would perform — enter passively during Quiet, more aggressively during Trending, pause during Toxic
 
 ---
