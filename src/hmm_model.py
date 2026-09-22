@@ -326,15 +326,15 @@ class RegimeDetector:
         arr = self._to_array(X)
         n_samples, n_features = arr.shape
         n_params = self._count_params(n_features)
-        ll = self.model.score(arr) * n_samples  # hmmlearn returns per-sample
+        ll = self.model.score(arr)  # total log-likelihood of the sequence
         return n_params * np.log(n_samples) - 2 * ll
 
     def aic(self, X: pd.DataFrame | np.ndarray) -> float:
         """Akaike Information Criterion."""
         arr = self._to_array(X)
-        n_samples, n_features = arr.shape
+        n_features = arr.shape[1]
         n_params = self._count_params(n_features)
-        ll = self.model.score(arr) * n_samples
+        ll = self.model.score(arr)  # total log-likelihood of the sequence
         return 2 * n_params - 2 * ll
 
     def _count_params(self, n_features: int) -> int:
