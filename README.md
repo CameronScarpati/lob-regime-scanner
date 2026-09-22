@@ -70,7 +70,7 @@ This is a personal learning project for getting hands-on with Hidden Markov Mode
 - **Standardization is causal in the default pipeline.** The HMM's `StandardScaler` and VPIN's volume-bucket sizing are both derived from the train segment only, and feature NaN handling forward-fills without back-filling, so no feature row draws on future data. The legacy fully in-sample mode (`train_frac=None`) uses full-sample statistics by design.
 - **Backtest is more realistic, still illustrative.** Execution is next-bar (a signal never earns the bar it fires on) and results are net of configurable taker fees and slippage (default 5.5 bps fee + 0.5 bps slippage per side), with gross figures reported alongside. Fills are still modeled naively (a full fill at the decision bar's mid, with returns accruing from the next bar; no queue position, no partial fills, no market impact). It exists to visualize regime behavior, not to demonstrate a tradeable edge.
 - **Two OFI formulations.** Both the simple volume-delta proxy and the canonical price-conditioned formulation of Cont, Kukanov & Stoikov (2014) are implemented; the HMM uses the canonical one, and the proxy is kept for comparison.
-- **Curated feature subset, diagonal covariance.** The pipeline computes roughly 30 candidate features but feeds a curated subset of 8 to the HMM, fit with diagonal covariance, to keep the parameter count manageable.
+- **Curated feature subset, diagonal covariance.** The pipeline computes 36 candidate features but feeds a curated subset of 8 to the HMM, fit with diagonal covariance, to keep the parameter count manageable.
 - **C++ engine is optional; throughput is measurable, not guaranteed.** A reproducible benchmark (`make bench`) is included. On a sample cloud VM it measured roughly 4-9M synthetic updates/sec through the C++ batch path and roughly 4M/sec through the per-call Python bindings, single-threaded. Run-to-run variance on shared hardware is large, so these are indicative measurements to re-run locally, not a validated performance claim.
 
 <br>
@@ -85,7 +85,7 @@ This is a personal learning project for getting hands-on with Hidden Markov Mode
 │   DATA LAYER       │   FEATURE ENGINE   │   HMM ENGINE     │   DASHBOARD             │
 │                    │                    │                  │                         │
 │  Tardis.dev        │  OFI (depth 1,5,10)│  Gaussian HMM    │  ┌──────┬──────-┐       │
-│  Direct HTTP       │  VPIN (flowrisk)   │  3-state (BIC)   │  │Book- │Regime │       │
+│  Direct HTTP       │  VPIN (flowrisk)   │  3-state (K=3)   │  │Book- │Regime │       │
 │  40+ exchanges     │  Kyle's λ (OLS)    │                  │  │map   │Probs  │       │
 │  Free 1st/mo       │  Spread dynamics   │  Baum-Welch EM   │  │Heat- │Stacked│       │
 │                    │  Book imbalance    │  (200 iter max)  │  │map   │Area   │       │
@@ -250,7 +250,7 @@ lob-regime-scanner/
 
 > For the full mathematical formulation, see [docs/methodology.md](docs/methodology.md).
 
-The pipeline computes roughly **30 candidate microstructure features** from Level 2 snapshots, feeds a curated subset to a **Gaussian Hidden Markov Model**, and decodes regimes via the **Viterbi algorithm**:
+The pipeline computes **36 candidate microstructure features** from Level 2 snapshots, feeds a curated subset to a **Gaussian Hidden Markov Model**, and decodes regimes causally with the **forward algorithm** (the Viterbi path is kept for visualization):
 
 **Feature Engineering.** Order flow imbalance in two formulations (a simple multi-level volume-delta proxy and the canonical price-conditioned Cont, Kukanov & Stoikov (2014) version, which the HMM uses), VPIN (Easley, L&oacute;pez de Prado & O'Hara, 2012), Kyle's &lambda; via rolling OLS, book imbalance, realized volatility at 4 horizons, return autocorrelation at 10 lags, spread dynamics, trade aggression, and cancellation ratio. NaN handling is forward-fill only (no backward fill), and VPIN's volume-bucket size (a full-sample statistic of whatever frame it sees) is estimated from the training segment alone, so no feature row draws on future data.
 

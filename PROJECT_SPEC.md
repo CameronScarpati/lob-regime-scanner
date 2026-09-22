@@ -15,6 +15,7 @@
 Build an end-to-end order book analytics platform that ingests limit order book (LOB) data, computes order flow features, detects hidden market regimes using a Hidden Markov Model, and renders everything in an interactive multi-panel dashboard. The underlying problem is inferring hidden states from noisy signals.
 
 **Author:** Cameron Scarpati
+
 **Stack:** Python (primary), C++ (performance-critical LOB reconstruction), Plotly Dash (dashboard)
 
 ---
@@ -53,7 +54,7 @@ Build an end-to-end order book analytics platform that ingests limit order book 
 
 Download and parse Bybit historical order book data (free, no API key needed).
 
-**Data source:** https://public.bybit.com/orderbook/ — organized as `/{symbol}/{date}.csv.gz`
+**Data source:** https://public.bybit.com/orderbook/, organized as `/{symbol}/{date}.csv.gz`
 - Focus on `BTCUSDT` perpetual futures
 - Each row: timestamp (μs), side, price, quantity for 500 levels
 - Download 2-3 weeks of data covering at least one significant price move (e.g., a liquidation cascade)
@@ -131,7 +132,7 @@ Compute the following at each resampled timestamp:
 | Spread (bps) | `(ask_1 - bid_1) / mid × 10000` | Liquidity measure |
 | Kyle's lambda | Rolling regression slope of `ΔP` on signed `√volume` | Price impact |
 | Trade flow aggression | Fraction of trades at or beyond the opposite quote | Urgency signal |
-| Cancellation ratio | Cancelled volume / total order volume (rolling window) | HFT activity proxy |
+| Cancellation ratio | Cancelled volume / total order volume (rolling window) | High-frequency activity proxy |
 | Realized volatility | `√(Σ r²_i)` at 1s, 10s, 60s, 300s horizons | Multi-scale vol |
 | Return autocorrelation | `corr(r_t, r_{t-k})` for k=1..10 at 1s resolution | Mean-rev vs momentum |
 
@@ -146,9 +147,9 @@ Stack all features into a matrix `X` of shape `(T, F)` where T = number of times
 ### 3.1 Model Specification
 
 Use a Gaussian Hidden Markov Model with **3 states** representing:
-- **State 0: "Quiet"** — low volatility, balanced order flow, tight spreads
-- **State 1: "Trending"** — directional OFI, rising volatility, momentum
-- **State 2: "Toxic/Stressed"** — extreme OFI, wide spreads, high VPIN, mean-reversion
+- **State 0 ("Quiet"):** low volatility, balanced order flow, tight spreads
+- **State 1 ("Trending"):** directional OFI, rising volatility, momentum
+- **State 2 ("Toxic/Stressed"):** extreme OFI, wide spreads, high VPIN, mean-reversion
 
 The number of states (3) is a starting point. Use BIC/AIC to evaluate 2, 3, 4, and 5 states.
 
@@ -188,15 +189,15 @@ After decoding regimes, compute:
 1. **Regime-conditional return distributions:** mean, std, skewness, kurtosis of forward 1s/10s/60s returns in each regime
 2. **Regime duration statistics:** how long does each regime persist? What are the transition probabilities?
 3. **Regime-conditional spread and VPIN:** are toxic regimes associated with wider spreads and higher VPIN? (Validation that the model learns meaningful states)
-4. **Regime-conditional price impact curves:** do Kyle's lambda estimates differ by regime? (They should — impact should be higher in toxic regimes)
+4. **Regime-conditional price impact curves:** do Kyle's lambda estimates differ by regime? (They should: impact should be higher in toxic regimes)
 
 ### 3.3 Simple Regime-Conditional Trading Signal
 
-Backtest a minimal strategy to check whether the detected regimes carry information about forward returns. (As built this became stricter than planned: causally decoded states, next-bar execution, and taker fees plus slippage, with headline numbers on a held-out segment — see `docs/methodology.md` Section 4.1.)
+Backtest a minimal strategy to check whether the detected regimes carry information about forward returns. (As built this became stricter than planned: causally decoded states, next-bar execution, and taker fees plus slippage, with headline numbers on a held-out segment. See `docs/methodology.md` Section 4.1.)
 - When the model detects a transition from Quiet-to-Trending, enter a position in the direction of OFI
 - When the model detects Toxic/Stressed, flatten all positions
 - Compute Sharpe ratio, max drawdown, hit rate, and profit per trade
-- **Important:** this is NOT the point of the project — the regime detection and visualization are. The backtest is a validation that the detected regimes contain useful information. Keep it simple.
+- **Important:** this is NOT the point of the project: the regime detection and visualization are. The backtest is a validation that the detected regimes contain useful information. Keep it simple.
 
 ### 3.4 Model Diagnostics
 
@@ -217,11 +218,11 @@ Use **Plotly Dash** for the dashboard framework. It is Python-native (good for l
 pip install dash plotly pandas numpy hmmlearn flowrisk pybind11
 ```
 
-### 4.2 Dashboard Layout — Four Synchronized Panels
+### 4.2 Dashboard Layout: Four Synchronized Panels
 
 The dashboard should have a header with the instrument name, date range, and model metadata, followed by four main panels arranged in a 2x2 grid:
 
-#### Panel 1: Order Book Heatmap with Regime Overlay (Top Left — LARGEST PANEL)
+#### Panel 1: Order Book Heatmap with Regime Overlay (Top Left, LARGEST PANEL)
 
 This is the centerpiece. Render a Bookmap-style heatmap:
 - **X-axis:** time
@@ -243,7 +244,7 @@ A stacked area chart showing the HMM's posterior probability of each state over 
 - Gradual transitions = ambiguous periods (interesting for analysis)
 - Use `plotly.graph_objects.Scatter` with `stackgroup='one'`
 
-Below this, show a small **transition matrix heatmap** — the 3×3 matrix of regime transition probabilities learned by the HMM.
+Below this, show a small **transition matrix heatmap**: the 3×3 matrix of regime transition probabilities learned by the HMM.
 
 #### Panel 3: 3D Order Book Depth Surface (Bottom Left)
 
@@ -262,7 +263,7 @@ Seeing the order book as a landscape that shifts over time makes depth dynamics 
 A multi-row subplot with:
 1. **VPIN time series** with threshold line (e.g., 0.5) and color-coded background by regime
 2. **OFI (normalized)** with regime-conditional mean lines
-3. **Spread (bps)** — should widen during Toxic regimes
+3. **Spread (bps)**: should widen during Toxic regimes
 4. **Cumulative PnL** of the simple regime-conditional strategy (if implemented)
 
 ### 4.3 Interactivity
@@ -378,7 +379,7 @@ pytest>=7.4         # for tests
 1. **Real-time mode:** Connect to Bybit WebSocket feed and run the HMM regime detector live, updating the dashboard every second
 2. **Multi-asset comparison:** Run the same regime detector on BTC, ETH, and SOL simultaneously and visualize regime synchronization across assets (when do all three enter "toxic" mode at once?)
 3. **C++ Viterbi decoder:** Implement the Viterbi algorithm in C++ with pybind11 bindings and measure whether regime decoding runs in < 1μs per timestamp
-4. **Regime-conditional optimal execution:** Given a parent order to execute, simulate how a TWAP vs. regime-aware execution strategy would perform — enter passively during Quiet, more aggressively during Trending, pause during Toxic
+4. **Regime-conditional optimal execution:** Given a parent order to execute, simulate how a TWAP vs. regime-aware execution strategy would perform: enter passively during Quiet, more aggressively during Trending, pause during Toxic
 
 ---
 

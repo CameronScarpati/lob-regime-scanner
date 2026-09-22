@@ -1,4 +1,4 @@
-"""LOB Regime Scanner - Market microstructure analytics platform."""
+"""LOB Regime Scanner - Order book analytics platform."""
 
 from src.book_reconstructor import (  # noqa: F401
     OrderBook,

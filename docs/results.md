@@ -31,11 +31,11 @@ After fitting, the three states are sorted by covariance trace (a variance
 proxy) and labeled Quiet, Trending, and Toxic. On the synthetic and sample data
 they separate along intuitive lines:
 
-- **Quiet** — lowest variance: tighter spreads, balanced order flow, near-zero
+- **Quiet** (lowest variance): tighter spreads, balanced order flow, near-zero
   return autocorrelation.
-- **Trending** — moderate variance: directional order flow imbalance and
+- **Trending** (moderate variance): directional order flow imbalance and
   positive short-horizon return autocorrelation, a momentum signature.
-- **Toxic** — highest variance: wider spreads, elevated VPIN, and negative
+- **Toxic** (highest variance): wider spreads, elevated VPIN, and negative
   return autocorrelation, a mean-reversion signature.
 
 The *direction* of these differences is the point, not any specific magnitude.
@@ -83,7 +83,7 @@ A deliberately simple regime-conditional rule is included: enter on a
 Quiet-to-Trending transition in the order-flow direction, flatten on Toxic
 detection. It is a visualization aid, not a strategy.
 
-The backtest runs on causally decoded states (filtered, not smoothed — see
+The backtest runs on causally decoded states (filtered, not smoothed; see
 methodology Section 2.3), applies next-bar execution, charges taker fees plus
 slippage on every unit of turnover, annualizes from the actual bar interval,
 and reports its headline statistics on the held-out walk-forward segment (with
@@ -119,8 +119,8 @@ On synthetic and sample order book data, the Gaussian HMM recovers three
 interpretable states (Quiet, Trending, Toxic) that differ in volatility, spread,
 and return autocorrelation in the directions microstructure intuition would
 predict. The project demonstrates the mechanics end to end: feature
-construction, HMM fitting and Viterbi decoding, regime-conditional analysis, and
-an interactive dashboard.
+construction, HMM fitting and causal filtered decoding (Viterbi is kept for
+visualization only), regime-conditional analysis, and an interactive dashboard.
 
 It is a learning project. The regimes have not been validated at scale on real
 market data, the walk-forward backtest covers one short single-instrument

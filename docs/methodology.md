@@ -57,7 +57,7 @@ We use the `flowrisk` library's `BulkVPIN` estimator for computation.
 
 ### 1.3 Kyle's Lambda (Price Impact Coefficient)
 
-Kyle's lambda (Kyle, 1985) measures the price impact of order flow — the amount the price moves per unit of signed volume. We estimate it via rolling OLS regression:
+Kyle's lambda (Kyle, 1985) measures the price impact of order flow: the amount the price moves per unit of signed volume. We estimate it via rolling OLS regression:
 
 ```
 ΔP_t = α + λ · sign(trade_t) · √|volume_t| + ε_t
@@ -85,9 +85,9 @@ computed over a trailing 300-second window. Higher λ indicates greater adverse 
 
 ### 1.5 Feature Matrix Assembly
 
-All features are assembled into a matrix **X** of shape (*T* × *F*), where *T* is the number of timestamps and *F* ≈ 36 features (9 simple OFI columns at 3 depths × 3 metrics, 6 canonical CKS OFI columns at 3 depths × 2 metrics, VPIN, 7 additional features, 4 realized volatility horizons, 10 autocorrelation lags).
+All features are assembled into a matrix **X** of shape (*T* × *F*), where *T* is the number of timestamps and *F* = 36 features (9 simple OFI columns at 3 depths × 3 metrics, 6 canonical CKS OFI columns at 3 depths × 2 metrics, VPIN, 6 additional features, 4 realized volatility horizons, 10 autocorrelation lags).
 
-The feature module supports z-score standardization using a **trailing rolling window** (`build_feature_matrix(standardize=True)`). The default dashboard pipeline calls `build_feature_matrix(standardize=False)` and feeds the raw features to the HMM, whose `StandardScaler` is **fit on the walk-forward training segment only** (Section 4.1). Held-out rows are therefore scaled with train-segment statistics, never with future data. In the legacy fully in-sample mode (`train_frac=None`) the scaler still sees the whole series, which is lookahead; that mode exists for comparison, not for evaluation. NaN and ±∞ values from early-window periods are forward-filled and any remaining leading NaNs are set to zero — there is deliberately **no backward fill**, which would leak future values into warm-up rows.
+The feature module supports z-score standardization using a **trailing rolling window** (`build_feature_matrix(standardize=True)`). The default dashboard pipeline calls `build_feature_matrix(standardize=False)` and feeds the raw features to the HMM, whose `StandardScaler` is **fit on the walk-forward training segment only** (Section 4.1). Held-out rows are therefore scaled with train-segment statistics, never with future data. In the legacy fully in-sample mode (`train_frac=None`) the scaler still sees the whole series, which is lookahead; that mode exists for comparison, not for evaluation. NaN and ±∞ values from early-window periods are forward-filled and any remaining leading NaNs are set to zero. There is deliberately **no backward fill**, which would leak future values into warm-up rows.
 
 ---
 
@@ -110,9 +110,9 @@ where:
 - **π** = P(*z*₁) is the initial state distribution
 
 The three states are interpreted (post-hoc, after fitting) as:
-- **State 0 — Quiet:** Low volatility, balanced OFI, tight spreads, low VPIN
-- **State 1 — Trending:** Directional OFI, elevated volatility, positive return autocorrelation
-- **State 2 — Toxic/Stressed:** Extreme OFI, wide spreads, high VPIN, mean-reverting returns
+- **State 0 (Quiet):** Low volatility, balanced OFI, tight spreads, low VPIN
+- **State 1 (Trending):** Directional OFI, elevated volatility, positive return autocorrelation
+- **State 2 (Toxic/Stressed):** Extreme OFI, wide spreads, high VPIN, mean-reverting returns
 
 ### 2.2 Parameter Estimation
 
@@ -185,7 +185,7 @@ BIC penalizes model complexity more heavily than AIC (via the ln(*T*) term vs. t
 
 ### 3.2 Selection Procedure
 
-For each candidate *K*, we fit the HMM, compute BIC and AIC, and select the *K* that minimizes each criterion. The sweep is implemented in `select_model`. The default pipeline uses *K* = 3, chosen for interpretability rather than asserted as provably optimal. On the synthetic and sample data, BIC tends to favor three states, but that is a property of this data and is not claimed as a general result for real markets.
+For each candidate *K*, we fit the HMM, compute BIC and AIC, and select the *K* that minimizes each criterion. The sweep is implemented in `select_model`. The default pipeline uses *K* = 3, chosen for interpretability rather than asserted as provably optimal. No BIC result is recorded in the repository; the sweep is a diagnostic and does not set the default.
 
 ---
 
@@ -216,7 +216,7 @@ The signal exploits regime transitions as entry/exit triggers:
 | Metric | Formula |
 |--------|---------|
 | Sharpe ratio | `(mean(pnl) / std(pnl)) × √(bars_per_year)`, on net-of-cost PnL (gross also reported) |
-| Max drawdown | `max(1 − equity_t / peak_equity_t)` with `equity = exp(cumsum(pnl))` anchored at 1.0 before the first bar — a fraction of peak equity, so a series that loses from bar one is measured against starting capital |
+| Max drawdown | `max(1 − equity_t / peak_equity_t)` with `equity = exp(cumsum(pnl))` anchored at 1.0 before the first bar: a fraction of peak equity, so a series that loses from bar one is measured against starting capital |
 | Hit rate | Fraction of completed trades with positive net PnL |
 | Profit per trade | Mean net PnL across all completed trades |
 
@@ -231,11 +231,11 @@ The signal exploits regime transitions as entry/exit triggers:
 - **One split, short sample:** The walk-forward design (Section 4.1) makes the headline metrics out-of-sample, but a single 70/30 split on a single instrument over a short window is not a robust validation. Rolling re-estimation over longer, more varied samples would be needed before believing any number.
 - **Naive fills:** The backtest assumes a full fill at the decision bar's mid (returns accrue from the next bar) plus a flat slippage assumption. Queue position, partial fills, and market impact are not modeled.
 - **Filtered decode is noisier than the smoothed path:** Causal decoding (Section 2.3) is the correct choice for a signal, but it flips states more readily than Viterbi, which raises turnover and therefore costs. That is a real property of trading on live estimates, not an artifact to tune away.
-- **Curated feature subset, diagonal covariance:** Roughly 30 features are computed, but the HMM uses a curated subset of 8, fit with diagonal covariance (Section 2.2). Off-diagonal feature correlations are not modeled in the default pipeline.
+- **Curated feature subset, diagonal covariance:** 36 features are computed, but the HMM uses a curated subset of 8, fit with diagonal covariance (Section 2.2). Off-diagonal feature correlations are not modeled in the default pipeline.
 - **Coarse VPIN / Kyle's lambda inputs:** Without a trade-level feed, both are computed from snapshot proxies rather than true signed trade flow, so they are noisy estimates.
 - **Stationarity assumption:** The Gaussian HMM assumes stationary emission distributions within each regime. In practice, the parameters of each regime may drift over multi-day horizons (e.g., baseline spread levels change with market conditions). Periodic model re-fitting would be needed for production use.
 
-- **Fixed number of states:** While BIC selects *K* = 3, the optimal number of regimes may vary across different market conditions, asset classes, or time horizons. An infinite HMM (Bayesian nonparametric approach) could adaptively determine *K*.
+- **Fixed number of states:** *K* = 3 is fixed by choice for interpretability (a BIC/AIC sweep over *K* ∈ {2, 3, 4, 5} is implemented in `select_model` but does not set the default), and the optimal number of regimes may vary across different market conditions, asset classes, or time horizons. An infinite HMM (Bayesian nonparametric approach) could adaptively determine *K*.
 
 - **Gaussian emissions:** Financial features often exhibit heavy tails and skewness. A Student-*t* HMM or mixture-of-Gaussians emission model could better capture tail behavior within each regime.
 

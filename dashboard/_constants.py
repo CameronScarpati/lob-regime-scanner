@@ -36,7 +36,7 @@ PANEL_DESCRIPTIONS = {
     "depth_surface": (
         "Gaussian-smoothed 3-D view of resting volume (z-axis) across "
         "price levels from mid (x-axis) and time (y-axis). Surface "
-        "colour encodes side: green for bids, red for asks — revealing "
+        "colour encodes side: green for bids, red for asks, revealing "
         "asymmetric liquidity provision across the book."
     ),
     "diagnostics": (
@@ -77,7 +77,7 @@ PLOTLY_LAYOUT_DEFAULTS = dict(
     ),
 )
 
-# Shared axis styling — academic-style framing with clean gridlines
+# Shared axis styling: academic-style framing with clean gridlines
 AXIS_STYLE = dict(
     showline=True,
     linewidth=1,
