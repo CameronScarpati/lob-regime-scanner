@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "lob-regime-scanner"
 version = "0.1.0"
-description = "HMM-based market microstructure analytics for cryptocurrency order books"
+description = "Regime detection on cryptocurrency order books: 30+ engineered features, a Gaussian hidden Markov model, a C++ pybind11 order-book engine, and a Plotly Dash dashboard"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
@@ -15,11 +15,8 @@ authors = [
 keywords = [
     "hidden-markov-model",
     "order-book",
-    "market-microstructure",
     "regime-detection",
     "cryptocurrency",
-    "quantitative-finance",
-    "high-frequency-trading",
     "vpin",
     "order-flow-imbalance",
 ]
@@ -77,7 +74,7 @@ line-length = 100
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 ignore = [
     "E501",    # line length handled by formatter
-    "SIM108",  # ternary operator — readability preference
+    "SIM108",  # ternary operator: readability preference
     "RUF001",  # ambiguous unicode in strings (en-dash in messages)
     "RUF002",  # ambiguous unicode in docstrings (math symbols: ×, −)
     "RUF003",  # ambiguous unicode in comments (math symbols)
