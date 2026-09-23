@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "lob-regime-scanner"
 version = "0.1.0"
-description = "Regime detection on cryptocurrency order books: 30+ engineered features, a Gaussian hidden Markov model, a C++ pybind11 order-book engine, and a Plotly Dash dashboard"
+description = "Regime detection on cryptocurrency order books: 36 candidate features (8 fed to the model), a Gaussian hidden Markov model, a C++ pybind11 order-book engine, and a Plotly Dash dashboard"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"

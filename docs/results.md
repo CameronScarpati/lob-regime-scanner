@@ -119,8 +119,9 @@ On synthetic and sample order book data, the Gaussian HMM recovers three
 interpretable states (Quiet, Trending, Toxic) that differ in volatility, spread,
 and return autocorrelation in the directions microstructure intuition would
 predict. The project demonstrates the mechanics end to end: feature
-construction, HMM fitting and causal filtered decoding (Viterbi is kept for
-visualization only), regime-conditional analysis, and an interactive dashboard.
+construction, HMM fitting and causal filtered decoding (the Viterbi path is
+also computed but not displayed), regime-conditional analysis, and an
+interactive dashboard.
 
 It is a learning project. The regimes have not been validated at scale on real
 market data, the walk-forward backtest covers one short single-instrument

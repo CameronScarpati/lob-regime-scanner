@@ -196,7 +196,7 @@ def run_pipeline(
     )
 
     # Select a curated subset for HMM to avoid curse of dimensionality
-    # (30+ features with full covariance → ~1400 params for 3 states).
+    # (36 candidate features with full covariance → about 2,100 params for 3 states).
     hmm_cols = [c for c in HMM_FEATURE_COLS if c in feature_matrix.columns]
     hmm_features = feature_matrix[hmm_cols]
 
@@ -221,8 +221,9 @@ def run_pipeline(
 
     # Causal (forward-filtered) states drive the backtest: the label at bar
     # t uses no observation after t, so it is a signal a live system could
-    # actually produce. The Viterbi path is a smoother — its label at t
-    # depends on the whole series — so it is kept only for visualization.
+    # actually produce. The Viterbi path is a smoother (its label at t
+    # depends on the whole series). It is returned as states_smoothed, but
+    # no dashboard panel reads it: the panels show the filtered states.
     states = detector.predict_filtered(hmm_features)
     state_probs = detector.filtered_proba(hmm_features)
     states_smoothed = detector.predict(hmm_features)

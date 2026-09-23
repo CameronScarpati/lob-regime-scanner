@@ -1,7 +1,9 @@
 """Hidden Markov Model regime detection engine.
 
-Fits a Gaussian HMM with configurable states, decodes regime sequences
-via Viterbi, and computes regime-conditional statistics.
+Fits a Gaussian HMM with configurable states, decodes regimes causally
+with the forward algorithm (``predict_filtered`` / ``filtered_proba``),
+also offers the smoothed Viterbi path (``predict``), and computes
+regime-conditional statistics.
 """
 
 from __future__ import annotations
