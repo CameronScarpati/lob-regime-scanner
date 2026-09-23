@@ -207,8 +207,9 @@ LOBEngine::batch_reconstruct(const int64_t* timestamps, const int* types,
     };
 
     // Second pass: process events and emit snapshots.
-    // Match Python semantics: process each (ts, type, uid) group, then
-    // emit a snapshot when we transition to a new timestamp.
+    // Match Python semantics: when the timestamp changes, first emit the row
+    // for the previous timestamp, then apply the new (ts, type, uid) group.
+    // A row stamped t therefore reflects only updates at or before t.
     int snap_idx = 0;
     int64_t current_ts = -1;
     int64_t event_idx = 0;
@@ -221,7 +222,15 @@ LOBEngine::batch_reconstruct(const int64_t* timestamps, const int* types,
         int64_t group_uid = update_ids[event_idx];
         int group_type = types[event_idx];
 
-        // Process the event group first (before emitting)
+        // Emit the previous timestamp's row before applying this group
+        if (ts != current_ts) {
+            if (current_ts >= 0) {
+                write_snapshot(snap_idx, current_ts);
+                snap_idx++;
+            }
+            current_ts = ts;
+        }
+
         if (group_type == 0) {
             snap_bid_levels.clear();
             snap_ask_levels.clear();
@@ -251,15 +260,6 @@ LOBEngine::batch_reconstruct(const int64_t* timestamps, const int* types,
         }
 
         book.set_last_update_ts(ts);
-
-        // Emit snapshot when we move to a new timestamp (matching Python)
-        if (ts != current_ts) {
-            if (current_ts >= 0) {
-                write_snapshot(snap_idx, current_ts);
-                snap_idx++;
-            }
-            current_ts = ts;
-        }
     }
 
     // Final snapshot

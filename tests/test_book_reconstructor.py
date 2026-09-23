@@ -185,6 +185,35 @@ class TestReconstruct:
         snapshots = reconstruct(events)
         assert len(snapshots) == 0
 
+    def test_row_reflects_only_updates_at_or_before_its_timestamp(self):
+        """Snapshots at 1, 2, 3 s with best bids 100, 200, 300 give rows 100, 200, 300."""
+        rows = []
+        for i, bid in enumerate([100.0, 200.0, 300.0], start=1):
+            ts = i * 1_000_000
+            rows.append((ts, "snapshot", "bid", bid, 1.0, i, i))
+            rows.append((ts, "snapshot", "ask", bid + 1.0, 1.0, i, i))
+        events = pd.DataFrame(
+            rows,
+            columns=["timestamp_us", "type", "side", "price", "qty", "update_id", "seq"],
+        )
+
+        snapshots = reconstruct(events, n_levels=1, use_cpp=False)
+
+        assert [s["timestamp"] for s in snapshots] == [1_000_000, 2_000_000, 3_000_000]
+        assert [s["bid_price_1"] for s in snapshots] == [100.0, 200.0, 300.0]
+
+    def test_first_row_ignores_later_delta(self):
+        events = _make_events(
+            snapshot_bids=[(50000.0, 1.0)],
+            snapshot_asks=[(50001.0, 1.5)],
+            delta_updates=[(1000, "bid", 50000.0, 2.0)],
+        )
+
+        snapshots = reconstruct(events, n_levels=1, use_cpp=False)
+
+        assert snapshots[0]["bid_qty_1"] == 1.0
+        assert snapshots[1]["bid_qty_1"] == 2.0
+
 
 class TestResampleSnapshots:
     def test_basic_resampling(self):

@@ -162,6 +162,35 @@ class TestBatchReconstruct:
         snapshots = reconstruct(events, n_levels=10, use_cpp=True)
         assert len(snapshots) == 0
 
+    def test_row_reflects_only_updates_at_or_before_its_timestamp(self):
+        """Snapshots at 1, 2, 3 s with best bids 100, 200, 300 give rows 100, 200, 300."""
+        rows = []
+        for i, bid in enumerate([100.0, 200.0, 300.0], start=1):
+            ts = i * 1_000_000
+            rows.append((ts, "snapshot", "bid", bid, 1.0, i, i))
+            rows.append((ts, "snapshot", "ask", bid + 1.0, 1.0, i, i))
+        events = pd.DataFrame(
+            rows,
+            columns=["timestamp_us", "type", "side", "price", "qty", "update_id", "seq"],
+        )
+
+        snapshots = reconstruct(events, n_levels=1, use_cpp=True)
+
+        assert [s["timestamp"] for s in snapshots] == [1_000_000, 2_000_000, 3_000_000]
+        assert [s["bid_price_1"] for s in snapshots] == [100.0, 200.0, 300.0]
+
+    def test_first_row_ignores_later_delta(self):
+        events = _make_events(
+            snapshot_bids=[(50000.0, 1.0)],
+            snapshot_asks=[(50001.0, 1.5)],
+            delta_updates=[(1000, "bid", 50000.0, 2.0)],
+        )
+
+        snapshots = reconstruct(events, n_levels=1, use_cpp=True)
+
+        assert snapshots[0]["bid_qty_1"] == 1.0
+        assert snapshots[1]["bid_qty_1"] == 2.0
+
     def test_cpp_matches_python(self):
         """Verify C++ and Python produce identical results."""
         events = _make_events(
@@ -210,3 +239,16 @@ class TestBatchReconstructDirect:
         assert result["spread"][0] == 1.0
         assert result["bid_price_1"][0] == 100.0
         assert result["ask_price_1"][0] == 101.0
+
+    def test_rows_do_not_see_next_timestamp(self):
+        ts = np.array([1, 1, 2, 2, 3, 3], dtype=np.int64)
+        types = np.zeros(6, dtype=np.int32)
+        sides = np.array([0, 1, 0, 1, 0, 1], dtype=np.int32)
+        prices = np.array([100.0, 101.0, 200.0, 201.0, 300.0, 301.0])
+        qtys = np.ones(6)
+        uids = np.array([1, 1, 2, 2, 3, 3], dtype=np.int64)
+
+        result = batch_reconstruct(ts, types, sides, prices, qtys, uids, 1)
+
+        assert list(result["timestamp"]) == [1.0, 2.0, 3.0]
+        assert list(result["bid_price_1"]) == [100.0, 200.0, 300.0]
