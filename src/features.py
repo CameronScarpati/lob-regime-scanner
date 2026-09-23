@@ -160,8 +160,12 @@ def compute_ofi_cks(df: pd.DataFrame, depths: list[int] | None = None) -> pd.Dat
 
 
 def _vpin_volumes(df: pd.DataFrame) -> np.ndarray:
-    """Trade volumes for VPIN: real trade sizes if present, else a
-    top-of-book proxy. Cleaned of NaN/inf and clipped non-negative."""
+    """Per-bar volumes for VPIN: real trade sizes if present, else a
+    top-of-book depth proxy, (bid_qty_1 + ask_qty_1) / 2.
+
+    Tardis book_snapshot files carry no trades, so the default pipeline
+    always takes the depth proxy: resting size at the touch, not traded
+    volume. Cleaned of NaN/inf and clipped non-negative."""
     if "last_trade_qty" in df.columns and df["last_trade_qty"].notna().any():
         volumes = df["last_trade_qty"].fillna(0).values.astype(float)
     else:
@@ -189,10 +193,23 @@ def compute_vpin(
 ) -> pd.Series:
     """Compute VPIN using the flowrisk library.
 
-    Trades are classified with the tick rule applied to mid_price changes.
+    Volume is split into buy and sell parts by flowrisk's bulk volume
+    classification (no tick rule, and trade sides are not used): each bar's
+    buy fraction is the standard normal CDF of its mid_price change divided
+    by a running volatility estimate of those changes. The per-bar volume
+    comes from :func:`_vpin_volumes`, which is a top-of-book depth proxy on
+    snapshot data.
+
+    flowrisk rounds each bar's buy volume down to a whole unit and counts
+    the remainder as sell volume, so the result depends on the volume unit.
+    With per-bar sizes of a few coins the floor pushes much of the volume
+    to the sell side and raises VPIN; the same book with every size
+    multiplied by 1000 gives a much lower VPIN. Compare VPIN levels only
+    across inputs that share a volume unit.
+
     Volume buckets are sized from *bucket_volume*; when it is None the size
     is derived from this frame's own total volume, which is a full-sample
-    statistic — pass a training-segment estimate from
+    statistic. Pass a training-segment estimate from
     :func:`estimate_vpin_bucket_volume` to keep the feature causal.
 
     Rows before the first valid mid price yield NaN rather than being
@@ -302,6 +319,14 @@ def compute_kyles_lambda(
 
     Uses last_trade_qty and last_trade_side when available, else proxies
     from mid-price direction and top-of-book volume.
+
+    Limitation: book snapshot data carry no trade side, so the default
+    pipeline always takes the tick-rule fallback, where the sign is
+    sign(ΔP) of the same mid-price change used as the dependent variable.
+    The regressor then shares its sign with ΔP, so the slope is pushed
+    toward positive values by construction and reads more like the size of
+    mid-price moves relative to top-of-book depth than like the price
+    impact of signed order flow.
     """
     delta_p = df["mid_price"].diff()
 
@@ -311,7 +336,8 @@ def compute_kyles_lambda(
         mapped = df["last_trade_side"].map({"buy": 1.0, "sell": -1.0})
         if mapped.notna().sum() > len(df) * 0.1:
             sign = mapped.fillna(0.0)
-    # Tick rule fallback when trade-side data is missing or sparse
+    # Tick rule fallback when trade-side data is missing or sparse. Note
+    # that this sign comes from delta_p itself, the dependent variable below.
     if (sign == 0).all():
         sign = np.sign(delta_p).fillna(0.0)
 
@@ -342,7 +368,11 @@ def compute_trade_flow_aggression(df: pd.DataFrame) -> pd.Series:
     """Fraction of trades at or beyond the opposite quote (rolling 5-min).
 
     A trade is aggressive if a buy occurs at or above ask_1 (or a sell
-    at or below bid_1).  Without per-trade data we proxy from snapshots.
+    at or below bid_1). This needs last_trade_price and last_trade_side.
+    Without trade prices the result is all NaN, and book snapshot data
+    carry no trades, so in the default pipeline this column is NaN and
+    :func:`build_feature_matrix` fills it with 0.0: it is a constant-zero
+    placeholder there, not a proxy computed from snapshots.
     """
     if "last_trade_price" not in df.columns or df["last_trade_price"].isna().all():
         return pd.Series(np.nan, index=df.index, name="trade_aggression")

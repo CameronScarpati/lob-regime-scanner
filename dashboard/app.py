@@ -179,8 +179,11 @@ def load_data(args: argparse.Namespace) -> dict:
     except NoDataError as exc:
         print(
             f"\n*** No data available ***\n\n{exc}\n\n"
-            "To use synthetic data instead, run with --demo:\n"
-            "  python -m dashboard.app --demo\n",
+            "To preview the dashboard with mock regimes, run with --demo:\n"
+            "  python -m dashboard.app --demo\n"
+            "To fit the pipeline on synthetic snapshot files, generate them first:\n"
+            "  python data/generate_realistic.py\n"
+            "  python -m dashboard.app --symbol BTCUSDT --start 2025-02-01 --end 2025-02-03\n",
             file=sys.stderr,
         )
         sys.exit(1)

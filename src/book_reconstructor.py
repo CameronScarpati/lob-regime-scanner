@@ -164,6 +164,13 @@ def _reconstruct_python(
     for (ts_us, rec_type, _uid), group in grouped:
         ts_us = int(ts_us)
 
+        # Emit the row for the previous timestamp before applying any update
+        # stamped later, so a row stamped t reflects only updates at or before t.
+        if ts_us != current_ts:
+            if current_ts >= 0:
+                snapshots.append(book.snapshot_dict(current_ts, n_levels))
+            current_ts = ts_us
+
         if rec_type == "snapshot":
             for side in ("bid", "ask"):
                 side_rows = group[group["side"] == side]
@@ -177,11 +184,6 @@ def _reconstruct_python(
                 book.update(row["side"], row["price"], row["qty"])
 
         book.last_update_ts = ts_us
-
-        if ts_us != current_ts:
-            if current_ts >= 0:
-                snapshots.append(book.snapshot_dict(current_ts, n_levels))
-            current_ts = ts_us
 
     if current_ts >= 0:
         snapshots.append(book.snapshot_dict(current_ts, n_levels))

@@ -2,6 +2,11 @@
 
 This file is needed alongside pyproject.toml because pybind11's
 setuptools integration requires Extension objects at build time.
+
+The extension is marked optional: if no C++17 compiler is available the
+build prints a warning and skips it, and the package installs without it.
+src/book_reconstructor.py then uses its pure-Python reconstruction path,
+and the C++ tests skip themselves.
 """
 
 from pybind11.setup_helpers import Pybind11Extension, build_ext
@@ -16,6 +21,7 @@ ext_modules = [
         ],
         cxx_std=17,
         extra_compile_args=["-O3"],
+        optional=True,
     ),
 ]
 

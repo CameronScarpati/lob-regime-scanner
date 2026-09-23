@@ -41,9 +41,9 @@ where μ̂_t and σ̂_t are the rolling mean and standard deviation. We also com
 
 VPIN estimates the probability that order flow is dominated by informed traders, following Easley, López de Prado & O'Hara (2012). The construction proceeds in three steps:
 
-1. **Trade classification:** Each snapshot is classified as a buy or sell using the tick rule applied to mid-price changes. If trade-side data is available from the exchange, it is used directly.
+1. **Volume classification:** flowrisk's `BulkVPIN` uses bulk volume classification, not the tick rule, and it does not read trade sides even when they exist. Each bar's volume is split into a buy fraction, the standard normal CDF of the bar's mid-price change divided by a running volatility estimate of those changes, and a sell fraction (the rest). The per-bar volume is `last_trade_qty` when that column has data. Tardis `book_snapshot_25` files carry no trades, so on real data (and on the synthetic files) the volume is a top-of-book depth proxy, `(bid_qty_1 + ask_qty_1) / 2`, which measures resting size at the touch rather than traded volume.
 
-2. **Volume bucketing:** Trades are partitioned into buckets of fixed total volume *V*. We set *V* = (total session volume) / 50, following the original authors' recommendation.
+2. **Volume bucketing:** Bars are partitioned into buckets of fixed total volume *V*. We set *V* = (total session volume) / 50, following the original authors' recommendation.
 
 3. **VPIN computation:** Within each volume bucket *n*:
 
@@ -54,6 +54,8 @@ VPIN_n = |V^{buy}_n − V^{sell}_n| / V
 The final VPIN estimate is the rolling average over the most recent *N* = 20 buckets. VPIN values near 0 indicate balanced (uninformed) flow; values approaching 1 indicate extreme order flow imbalance from potentially informed participants.
 
 We use the `flowrisk` library's `BulkVPIN` estimator for computation.
+
+**Unit dependence.** flowrisk rounds each bar's buy volume down to a whole unit (`floor(buy_fraction × volume)`) and counts the remainder as sell volume. When per-bar volumes are a few coins or less, as with BTC sizes, that floor moves a large share of the volume to the sell side and raises VPIN, so the value depends on the unit the sizes are quoted in. In one check on the first 20,000 five-second rows of the synthetic data, mean VPIN was about 0.31 at the native sizes and about 0.03 with every size multiplied by 1000. The default pipeline feeds VPIN to the HMM as computed, so its level is best read as unit dependent rather than as a probability.
 
 ### 1.3 Kyle's Lambda (Price Impact Coefficient)
 
@@ -71,6 +73,8 @@ where the slope coefficient λ is:
 
 computed over a trailing 300-second window. Higher λ indicates greater adverse selection cost, typically observed during periods of informed trading activity.
 
+**What the default pipeline actually estimates.** Book snapshot data carry no trade side or size, so `compute_kyles_lambda` falls back to the tick rule, sign(ΔP_t), for the sign and to top-of-book depth for the volume. The sign then comes from the same mid-price change that is the dependent variable, which makes the regression circular: the regressor always has the sign of ΔP, so the slope is pushed toward positive values by construction. On the synthetic data the feature was never negative across 51,840 five-second rows. It is still one of the eight HMM inputs, and is better read as the size of mid-price moves relative to top-of-book depth than as the price impact of signed order flow. An honest estimate needs a trade sign that does not come from ΔP_t itself, such as taker-side trade data.
+
 ### 1.4 Additional Features
 
 | Feature | Formula | Range | Interpretation |
@@ -78,8 +82,8 @@ computed over a trailing 300-second window. Higher λ indicates greater adverse 
 | Book imbalance | `(V_bid − V_ask) / (V_bid + V_ask)` at top 10 levels | [−1, 1] | Directional pressure from resting orders |
 | Weighted mid-price | `(ask₁ × bid_qty₁ + bid₁ × ask_qty₁) / (bid_qty₁ + ask_qty₁)` | ℝ | Volume-weighted fair price estimate |
 | Spread (bps) | `(ask₁ − bid₁) / mid × 10,000` | [0, ∞) | Liquidity/transaction cost measure |
-| Trade flow aggression | Fraction of trades at or beyond opposite quote (rolling) | [0, 1] | Urgency proxy |
-| Cancellation ratio | Disappeared volume / total volume (rolling) | [0, 1] | HFT activity proxy |
+| Trade flow aggression | Fraction of trades at or beyond opposite quote (rolling) | [0, 1] | Urgency proxy; needs trade prices, so it is a constant-zero placeholder on snapshot data (Section 5.1) |
+| Cancellation ratio | Disappeared volume / total volume (rolling) | [0, 1] | Order churn proxy |
 | Realized volatility | `√(Σ r²_i)` at horizons 1s, 10s, 60s, 300s | [0, ∞) | Multi-scale volatility |
 | Return autocorrelation | `corr(r_t, r_{t−k})` for *k* = 1, …, 10 (rolling) | [−1, 1] | Mean-reversion vs. momentum signature |
 
@@ -144,7 +148,7 @@ There are two distinct decodes here, and the difference matters more than it fir
 ẑ*_{1:T} = argmax_{z_{1:T}} P(z_{1:T} | x_{1:T}, θ)
 ```
 
-via dynamic programming in O(*T* × *K*²) time, and the forward-backward algorithm gives the smoothed marginals P(z_t | x_{1:T}). Both condition on the **entire** series, including observations *after* t. That makes them the best retrospective estimate, and it also makes them **unusable as a trading signal**: a volatility burst beginning after *t* can retroactively relabel bar *t*, so a backtest driven by them "knows" about moves that have not happened yet. `RegimeDetector.predict` / `.predict_proba` implement these, and the pipeline keeps the Viterbi path only for visualization (returned as `states_smoothed`).
+via dynamic programming in O(*T* × *K*²) time, and the forward-backward algorithm gives the smoothed marginals P(z_t | x_{1:T}). Both condition on the **entire** series, including observations *after* t. That makes them the best retrospective estimate, and it also makes them **unusable as a live signal**: a volatility burst beginning after *t* can retroactively relabel bar *t*, so a backtest driven by them "knows" about moves that have not happened yet. `RegimeDetector.predict` / `.predict_proba` implement these. The pipeline also computes the Viterbi path and returns it as `states_smoothed`, but no dashboard panel reads it: every panel shows the filtered states and filtered probabilities.
 
 **Filtered (forward algorithm only).** The causal counterpart conditions only on the past:
 
@@ -232,14 +236,14 @@ The signal exploits regime transitions as entry/exit triggers:
 - **Naive fills:** The backtest assumes a full fill at the decision bar's mid (returns accrue from the next bar) plus a flat slippage assumption. Queue position, partial fills, and market impact are not modeled.
 - **Filtered decode is noisier than the smoothed path:** Causal decoding (Section 2.3) is the correct choice for a signal, but it flips states more readily than Viterbi, which raises turnover and therefore costs. That is a real property of trading on live estimates, not an artifact to tune away.
 - **Curated feature subset, diagonal covariance:** 36 features are computed, but the HMM uses a curated subset of 8, fit with diagonal covariance (Section 2.2). Off-diagonal feature correlations are not modeled in the default pipeline.
-- **Coarse VPIN / Kyle's lambda inputs:** Without a trade-level feed, both are computed from snapshot proxies rather than true signed trade flow, so they are noisy estimates.
+- **Coarse VPIN / Kyle's lambda inputs:** Without a trade-level feed, both are computed from snapshot proxies rather than true signed trade flow. VPIN runs on a top-of-book depth proxy and depends on the volume unit (Section 1.2), and Kyle's lambda takes its sign from the price change it regresses on (Section 1.3).
 - **Stationarity assumption:** The Gaussian HMM assumes stationary emission distributions within each regime. In practice, the parameters of each regime may drift over multi-day horizons (e.g., baseline spread levels change with market conditions). Periodic model re-fitting would be needed for production use.
 
 - **Fixed number of states:** *K* = 3 is fixed by choice for interpretability (a BIC/AIC sweep over *K* ∈ {2, 3, 4, 5} is implemented in `select_model` but does not set the default), and the optimal number of regimes may vary across different market conditions, asset classes, or time horizons. An infinite HMM (Bayesian nonparametric approach) could adaptively determine *K*.
 
 - **Gaussian emissions:** Financial features often exhibit heavy tails and skewness. A Student-*t* HMM or mixture-of-Gaussians emission model could better capture tail behavior within each regime.
 
-- **Trade data approximation:** Without a full order-level feed, cancellation ratio and trade flow aggression are proxied from snapshot data. These proxies introduce measurement noise relative to the true quantities.
+- **Trade data approximation:** Without a full order-level feed, cancellation ratio is proxied from snapshot data, which introduces measurement noise relative to the true quantity. Trade flow aggression needs trade prices and sides, which snapshot data do not have, so in the default pipeline it is all NaN before the fill step and therefore a constant 0.0 column. It is not one of the eight HMM inputs.
 
 - **Single-asset analysis:** This study focuses on BTCUSDT perpetual futures. Cross-asset regime synchronization (e.g., BTC, ETH, SOL entering Toxic simultaneously) would provide richer market structure insights.
 

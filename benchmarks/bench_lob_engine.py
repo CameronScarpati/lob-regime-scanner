@@ -2,11 +2,13 @@
 
 Measures order book update throughput through two paths:
 
-1. ``LOBEngine.update()`` called per event from Python — includes pybind11
-   call overhead, so this is the floor.
-2. ``batch_reconstruct()`` — the batch path the pipeline actually uses,
-   where the whole event array is processed in C++ and snapshots are
-   emitted once per unique timestamp.
+1. ``LOBEngine.update()`` called per event from Python. This includes the
+   pybind11 call overhead, so it is the floor.
+2. ``batch_reconstruct()``, the batch path behind
+   ``src.book_reconstructor.reconstruct``, where the whole event array is
+   processed in C++ and snapshots are emitted once per unique timestamp.
+   The default dashboard pipeline does not call it: it loads book snapshots
+   directly and never rebuilds a book from level updates.
 
 Run with ``make bench`` (the extension is built by ``make install-dev``).
 Numbers are hardware-dependent single-threaded measurements on synthetic
