@@ -71,7 +71,7 @@ This is a personal learning project for getting hands-on with Hidden Markov Mode
 - **Backtest is more realistic, still illustrative.** Execution is next-bar (a signal never earns the bar it fires on) and results are net of configurable taker fees and slippage (default 5.5 bps fee + 0.5 bps slippage per side), with gross figures reported alongside. Fills are still modeled naively (a full fill at the decision bar's mid, with returns accruing from the next bar; no queue position, no partial fills, no market impact). It exists to visualize regime behavior, not to demonstrate a tradeable edge.
 - **Two OFI formulations.** Both the simple volume-delta proxy and the canonical price-conditioned formulation of Cont, Kukanov & Stoikov (2014) are implemented; the HMM uses the canonical one, and the proxy is kept for comparison.
 - **Curated feature subset, diagonal covariance.** The pipeline computes 36 candidate features but feeds a curated subset of 8 to the HMM, fit with diagonal covariance, to keep the parameter count manageable.
-- **C++ engine is optional; throughput is measurable, not guaranteed.** A reproducible benchmark (`make bench`) is included. On a sample cloud VM it measured roughly 4-9M synthetic updates/sec through the C++ batch path and roughly 4M/sec through the per-call Python bindings, single-threaded. Run-to-run variance on shared hardware is large, so these are indicative measurements to re-run locally, not a validated performance claim.
+- **C++ engine is optional; throughput is measurable, not guaranteed.** A reproducible benchmark (`make bench`) is included. Run-to-run variance on shared hardware is large, so measure throughput locally with the benchmark; the README states no figure.
 
 <br>
 
